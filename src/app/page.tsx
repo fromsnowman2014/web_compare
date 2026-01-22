@@ -1,16 +1,17 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { FileDropzone } from '@/components/FileDropzone';
+import { FileDropzone, DropItem } from '@/components/FileDropzone';
 import { DiffViewer } from '@/components/DiffViewer';
 import { HexViewer } from '@/components/HexViewer';
 import { DirectoryViewer } from '@/components/DirectoryViewer';
 import { useCompareStore } from '@/store/compare';
 import type { FileData } from '@/types';
 import { cn } from '@/lib/utils';
-import { GitCompare, RotateCcw, Keyboard, X } from 'lucide-react';
+import { GitCompare, RotateCcw, Keyboard, X, Play } from 'lucide-react';
 
 type ViewMode = 'text' | 'binary' | 'directory';
+type AppMode = 'upload' | 'compare';
 
 export default function Home() {
   const {
@@ -24,17 +25,21 @@ export default function Home() {
   const [leftDirectoryFiles, setLeftDirectoryFiles] = useState<FileData[]>([]);
   const [rightDirectoryFiles, setRightDirectoryFiles] = useState<FileData[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('text');
+  const [appMode, setAppMode] = useState<AppMode>('upload');
   const [showShortcuts, setShowShortcuts] = useState(false);
+
+  // Check if content exists on each side
+  const hasLeftContent = leftFile || leftDirectoryFiles.length > 0;
+  const hasRightContent = rightFile || rightDirectoryFiles.length > 0;
+  const hasBothContent = hasLeftContent && hasRightContent;
+
+  // Determine if we should show directory view (any side has directory)
+  const shouldShowDirectoryView = leftDirectoryFiles.length > 0 || rightDirectoryFiles.length > 0;
 
   const handleLeftFileLoaded = useCallback(
     (file: FileData) => {
       setLeftFile(file);
       setLeftDirectoryFiles([]);
-      if (file.type === 'binary' || file.type === 'image') {
-        setViewMode('binary');
-      } else {
-        setViewMode('text');
-      }
     },
     [setLeftFile]
   );
@@ -43,11 +48,6 @@ export default function Home() {
     (file: FileData) => {
       setRightFile(file);
       setRightDirectoryFiles([]);
-      if (file.type === 'binary' || file.type === 'image') {
-        setViewMode('binary');
-      } else {
-        setViewMode('text');
-      }
     },
     [setRightFile]
   );
@@ -56,7 +56,6 @@ export default function Home() {
     (files: FileData[]) => {
       setLeftDirectoryFiles(files);
       setLeftFile(null);
-      setViewMode('directory');
     },
     [setLeftFile]
   );
@@ -65,17 +64,52 @@ export default function Home() {
     (files: FileData[]) => {
       setRightDirectoryFiles(files);
       setRightFile(null);
-      setViewMode('directory');
     },
     [setRightFile]
   );
 
-  const handleDirectoryFileSelect = useCallback(
-    (leftFile: FileData | undefined, rightFile: FileData | undefined) => {
-      if (leftFile) setLeftFile(leftFile);
-      if (rightFile) setRightFile(rightFile);
+  // Handle multi-drop: distribute items based on modification time
+  const handleMultiDrop = useCallback(
+    (items: DropItem[]) => {
+      if (items.length < 2) return;
 
-      const file = leftFile || rightFile;
+      // Sort by modification time (oldest first = left, newest = right)
+      const sorted = [...items].sort((a, b) => {
+        const aTime = a.lastModified || 0;
+        const bTime = b.lastModified || 0;
+        return aTime - bTime;
+      });
+
+      const leftItem = sorted[0];
+      const rightItem = sorted[1];
+
+      // Set left side
+      if (leftItem.type === 'file') {
+        setLeftFile(leftItem.data as FileData);
+        setLeftDirectoryFiles([]);
+      } else {
+        setLeftDirectoryFiles(leftItem.data as FileData[]);
+        setLeftFile(null);
+      }
+
+      // Set right side
+      if (rightItem.type === 'file') {
+        setRightFile(rightItem.data as FileData);
+        setRightDirectoryFiles([]);
+      } else {
+        setRightDirectoryFiles(rightItem.data as FileData[]);
+        setRightFile(null);
+      }
+    },
+    [setLeftFile, setRightFile]
+  );
+
+  const handleDirectoryFileSelect = useCallback(
+    (left: FileData | undefined, right: FileData | undefined) => {
+      if (left) setLeftFile(left);
+      if (right) setRightFile(right);
+
+      const file = left || right;
       if (file) {
         if (file.type === 'binary' || file.type === 'image') {
           setViewMode('binary');
@@ -87,15 +121,42 @@ export default function Home() {
     [setLeftFile, setRightFile]
   );
 
+  const handleClearLeft = useCallback(() => {
+    setLeftFile(null);
+    setLeftDirectoryFiles([]);
+  }, [setLeftFile]);
+
+  const handleClearRight = useCallback(() => {
+    setRightFile(null);
+    setRightDirectoryFiles([]);
+  }, [setRightFile]);
+
   const handleReset = useCallback(() => {
     reset();
     setLeftDirectoryFiles([]);
     setRightDirectoryFiles([]);
     setViewMode('text');
+    setAppMode('upload');
   }, [reset]);
 
-  const hasFiles = leftFile || rightFile;
-  const hasDirectories = leftDirectoryFiles.length > 0 || rightDirectoryFiles.length > 0;
+  const handleStartCompare = useCallback(() => {
+    // Determine view mode based on content
+    if (shouldShowDirectoryView) {
+      setViewMode('directory');
+    } else if (
+      (leftFile?.type === 'binary' || leftFile?.type === 'image') ||
+      (rightFile?.type === 'binary' || rightFile?.type === 'image')
+    ) {
+      setViewMode('binary');
+    } else {
+      setViewMode('text');
+    }
+    setAppMode('compare');
+  }, [shouldShowDirectoryView, leftFile, rightFile]);
+
+  const handleBackToUpload = useCallback(() => {
+    setAppMode('upload');
+  }, []);
 
   return (
     <main className="h-screen flex flex-col bg-gray-900 text-white">
@@ -110,8 +171,8 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* View mode tabs */}
-          {(hasFiles || hasDirectories) && (
+          {/* View mode tabs - only show in compare mode */}
+          {appMode === 'compare' && (
             <div className="flex bg-gray-700 rounded-lg p-1">
               <button
                 onClick={() => setViewMode('text')}
@@ -137,11 +198,21 @@ export default function Home() {
                   'px-3 py-1 text-sm rounded transition-colors',
                   viewMode === 'directory' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:text-white'
                 )}
-                disabled={!hasDirectories}
+                disabled={!shouldShowDirectoryView}
               >
                 Directory
               </button>
             </div>
+          )}
+
+          {/* Back to upload button - only in compare mode */}
+          {appMode === 'compare' && (
+            <button
+              onClick={handleBackToUpload}
+              className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+            >
+              Change Files
+            </button>
           )}
 
           <button
@@ -164,26 +235,62 @@ export default function Home() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-h-0">
-        {!hasFiles && !hasDirectories ? (
-          /* File selection view */
-          <div className="flex-1 flex gap-4 p-6">
-            <div className="flex-1 flex flex-col">
-              <h2 className="text-lg font-semibold mb-3 text-blue-400">Left (Original)</h2>
-              <FileDropzone
-                side="left"
-                onFileLoaded={handleLeftFileLoaded}
-                onDirectoryLoaded={handleLeftDirectoryLoaded}
-                className="flex-1"
-              />
+        {appMode === 'upload' ? (
+          /* Upload view - always show until user clicks Compare */
+          <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex gap-4 p-6">
+              {/* Left dropzone */}
+              <div className="flex-1 flex flex-col">
+                <h2 className="text-lg font-semibold mb-3 text-blue-400">Left (Original)</h2>
+                <FileDropzone
+                  side="left"
+                  onFileLoaded={handleLeftFileLoaded}
+                  onDirectoryLoaded={handleLeftDirectoryLoaded}
+                  onMultiDrop={handleMultiDrop}
+                  currentFile={leftFile}
+                  currentDirectory={leftDirectoryFiles}
+                  onClear={handleClearLeft}
+                  className="flex-1"
+                />
+              </div>
+
+              {/* Right dropzone */}
+              <div className="flex-1 flex flex-col">
+                <h2 className="text-lg font-semibold mb-3 text-green-400">Right (Modified)</h2>
+                <FileDropzone
+                  side="right"
+                  onFileLoaded={handleRightFileLoaded}
+                  onDirectoryLoaded={handleRightDirectoryLoaded}
+                  onMultiDrop={handleMultiDrop}
+                  currentFile={rightFile}
+                  currentDirectory={rightDirectoryFiles}
+                  onClear={handleClearRight}
+                  className="flex-1"
+                />
+              </div>
             </div>
-            <div className="flex-1 flex flex-col">
-              <h2 className="text-lg font-semibold mb-3 text-green-400">Right (Modified)</h2>
-              <FileDropzone
-                side="right"
-                onFileLoaded={handleRightFileLoaded}
-                onDirectoryLoaded={handleRightDirectoryLoaded}
-                className="flex-1"
-              />
+
+            {/* Compare button - shows when both sides have content */}
+            <div className="px-6 pb-6">
+              <button
+                onClick={handleStartCompare}
+                disabled={!hasBothContent}
+                className={cn(
+                  'w-full flex items-center justify-center gap-2 py-3 rounded-lg text-lg font-semibold transition-all',
+                  hasBothContent
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                    : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                )}
+              >
+                <Play className="w-5 h-5" />
+                {hasBothContent
+                  ? 'Compare Files'
+                  : hasLeftContent
+                  ? 'Drop or select a file on the right side'
+                  : hasRightContent
+                  ? 'Drop or select a file on the left side'
+                  : 'Drop or select files to compare'}
+              </button>
             </div>
           </div>
         ) : (
@@ -194,7 +301,7 @@ export default function Home() {
               <div className="flex-1 flex items-center justify-between px-4 py-2 bg-gray-800/50 border-r border-gray-700">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-blue-400 font-medium">
-                    {leftFile?.name || (hasDirectories ? `${leftDirectoryFiles.length} files` : 'No file')}
+                    {leftFile?.name || (leftDirectoryFiles.length > 0 ? `${leftDirectoryFiles.length} files` : 'No file')}
                   </span>
                   {leftFile && (
                     <span className="text-xs text-gray-500">
@@ -202,22 +309,11 @@ export default function Home() {
                     </span>
                   )}
                 </div>
-                {(leftFile || leftDirectoryFiles.length > 0) && (
-                  <button
-                    onClick={() => {
-                      setLeftFile(null);
-                      setLeftDirectoryFiles([]);
-                    }}
-                    className="p-1 hover:bg-gray-700 rounded"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
               </div>
               <div className="flex-1 flex items-center justify-between px-4 py-2 bg-gray-800/50">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-green-400 font-medium">
-                    {rightFile?.name || (hasDirectories ? `${rightDirectoryFiles.length} files` : 'No file')}
+                    {rightFile?.name || (rightDirectoryFiles.length > 0 ? `${rightDirectoryFiles.length} files` : 'No file')}
                   </span>
                   {rightFile && (
                     <span className="text-xs text-gray-500">
@@ -225,26 +321,15 @@ export default function Home() {
                     </span>
                   )}
                 </div>
-                {(rightFile || rightDirectoryFiles.length > 0) && (
-                  <button
-                    onClick={() => {
-                      setRightFile(null);
-                      setRightDirectoryFiles([]);
-                    }}
-                    className="p-1 hover:bg-gray-700 rounded"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
               </div>
             </div>
 
             {/* Comparison content */}
             <div className="flex-1 min-h-0">
-              {viewMode === 'directory' && hasDirectories ? (
+              {viewMode === 'directory' && shouldShowDirectoryView ? (
                 <DirectoryViewer
-                  leftFiles={leftDirectoryFiles}
-                  rightFiles={rightDirectoryFiles}
+                  leftFiles={leftDirectoryFiles.length > 0 ? leftDirectoryFiles : (leftFile ? [leftFile] : [])}
+                  rightFiles={rightDirectoryFiles.length > 0 ? rightDirectoryFiles : (rightFile ? [rightFile] : [])}
                   onFileSelect={handleDirectoryFileSelect}
                 />
               ) : viewMode === 'binary' ? (
