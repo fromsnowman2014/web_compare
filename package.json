@@ -1,0 +1,39 @@
+{
+  "name": "web-compare",
+  "version": "1.0.0",
+  "description": "A web-based file comparison tool like Beyond Compare",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.6.0",
+    "clsx": "^2.1.0",
+    "diff": "^5.2.0",
+    "diff-match-patch": "^1.0.5",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.312.0",
+    "monaco-editor": "^0.45.0",
+    "next": "14.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tailwind-merge": "^2.2.0",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^5.0.9",
+    "@types/diff-match-patch": "^1.0.36",
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "autoprefixer": "^10.4.17",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "14.1.0",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.3"
+  }
+}
