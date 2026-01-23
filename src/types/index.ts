@@ -7,7 +7,6 @@ export interface FileData {
   type: FileType;
   size: number;
   lastModified?: number;
-  encoding?: string;
   children?: FileData[];
 }
 
@@ -30,7 +29,6 @@ export interface CharDiff {
   side: 'left' | 'right';
 }
 
-// A block of consecutive diff lines (for grouping changes)
 export interface DiffBlock {
   startIndex: number;
   endIndex: number;
@@ -88,11 +86,7 @@ export interface CompareState {
   rightFile: FileData | null;
   diffResult: DiffResult | null;
   directoryDiff: DirectoryDiffItem[] | null;
-  currentDiffIndex: number;
   syncScroll: boolean;
-  viewMode: 'side-by-side' | 'inline' | 'unified';
-  showOnlyDiffs: boolean;
-  editMode: boolean;
   editedContent: {
     left: string;
     right: string;
@@ -104,17 +98,7 @@ export interface CompareActions {
   setRightFile: (file: FileData | null) => void;
   setDiffResult: (result: DiffResult | null) => void;
   setDirectoryDiff: (diff: DirectoryDiffItem[] | null) => void;
-  goToNextDiff: () => void;
-  goToPrevDiff: () => void;
-  goToDiff: (index: number) => void;
   setSyncScroll: (sync: boolean) => void;
-  setViewMode: (mode: 'side-by-side' | 'inline' | 'unified') => void;
-  setShowOnlyDiffs: (show: boolean) => void;
-  setEditMode: (edit: boolean) => void;
   updateEditedContent: (side: 'left' | 'right', content: string) => void;
-  copyToLeft: (lineIndex: number) => void;
-  copyToRight: (lineIndex: number) => void;
-  copyAllToLeft: () => void;
-  copyAllToRight: () => void;
   reset: () => void;
 }

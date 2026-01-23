@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react';
 import { Upload, Link, FolderOpen, File, Folder, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FileData } from '@/types';
-import { processFile, fetchFileFromUrl, processDirectory } from '@/lib/file';
+import { processFile, fetchFileFromUrl } from '@/lib/file';
 import { formatBytes } from '@/lib/utils';
 
 export interface DropItem {

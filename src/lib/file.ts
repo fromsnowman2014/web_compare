@@ -4,12 +4,10 @@ export function detectFileType(file: File): FileType {
   const name = file.name.toLowerCase();
   const mimeType = file.type;
 
-  // Image files
   if (mimeType.startsWith('image/')) {
     return 'image';
   }
 
-  // Binary file extensions
   const binaryExtensions = [
     '.exe', '.dll', '.so', '.dylib', '.bin', '.dat',
     '.zip', '.tar', '.gz', '.7z', '.rar',
@@ -24,7 +22,6 @@ export function detectFileType(file: File): FileType {
     return 'binary';
   }
 
-  // Text file extensions
   const textExtensions = [
     '.txt', '.md', '.json', '.xml', '.html', '.htm', '.css',
     '.js', '.ts', '.jsx', '.tsx', '.vue', '.svelte',
@@ -40,12 +37,10 @@ export function detectFileType(file: File): FileType {
     return 'text';
   }
 
-  // Check MIME type for text
   if (mimeType.startsWith('text/') || mimeType === 'application/json') {
     return 'text';
   }
 
-  // Default to binary for unknown types
   return 'binary';
 }
 
@@ -96,7 +91,7 @@ export function getLanguageFromFilename(filename: string): string {
   return languageMap[ext] || 'plaintext';
 }
 
-export async function readFileAsText(file: File): Promise<string> {
+async function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -105,7 +100,7 @@ export async function readFileAsText(file: File): Promise<string> {
   });
 }
 
-export async function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
+async function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as ArrayBuffer);
@@ -136,81 +131,10 @@ export async function processFile(file: File, basePath: string = ''): Promise<Fi
   };
 }
 
-export async function processDirectory(
-  items: FileSystemEntry[],
-  basePath: string = ''
-): Promise<FileData[]> {
-  const files: FileData[] = [];
-
-  for (const item of items) {
-    if (item.isFile) {
-      const file = await getFileFromEntry(item as FileSystemFileEntry);
-      if (file) {
-        const fileData = await processFile(file, basePath);
-        files.push(fileData);
-      }
-    } else if (item.isDirectory) {
-      const dirEntry = item as FileSystemDirectoryEntry;
-      const dirFiles = await readDirectoryEntry(dirEntry, `${basePath}/${item.name}`);
-      files.push(...dirFiles);
-    }
-  }
-
-  return files;
-}
-
-function getFileFromEntry(entry: FileSystemFileEntry): Promise<File | null> {
-  return new Promise((resolve) => {
-    entry.file(
-      (file) => resolve(file),
-      () => resolve(null)
-    );
-  });
-}
-
-function readDirectoryEntry(entry: FileSystemDirectoryEntry, path: string): Promise<FileData[]> {
-  return new Promise((resolve) => {
-    const reader = entry.createReader();
-    const files: FileData[] = [];
-
-    const readEntries = () => {
-      reader.readEntries(async (entries) => {
-        if (entries.length === 0) {
-          resolve(files);
-          return;
-        }
-
-        for (const entry of entries) {
-          if (entry.isFile) {
-            const file = await getFileFromEntry(entry as FileSystemFileEntry);
-            if (file) {
-              const fileData = await processFile(file, path);
-              files.push(fileData);
-            }
-          } else if (entry.isDirectory) {
-            const dirFiles = await readDirectoryEntry(
-              entry as FileSystemDirectoryEntry,
-              `${path}/${entry.name}`
-            );
-            files.push(...dirFiles);
-          }
-        }
-
-        readEntries(); // Continue reading
-      });
-    };
-
-    readEntries();
-  });
-}
-
 export async function fetchFileFromUrl(url: string): Promise<FileData> {
-  // Use API route to bypass CORS
   const response = await fetch('/api/fetch', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
   });
 
@@ -247,45 +171,6 @@ export async function fetchFileFromUrl(url: string): Promise<FileData> {
   };
 }
 
-export function buildDirectoryTree(files: FileData[]): FileData {
-  const root: FileData = {
-    name: 'root',
-    path: '',
-    content: '',
-    type: 'directory',
-    size: 0,
-    children: [],
-  };
-
-  for (const file of files) {
-    const parts = file.path.split('/').filter(Boolean);
-    let current = root;
-
-    for (let i = 0; i < parts.length - 1; i++) {
-      const part = parts[i];
-      let child = current.children?.find((c) => c.name === part && c.type === 'directory');
-
-      if (!child) {
-        child = {
-          name: part,
-          path: parts.slice(0, i + 1).join('/'),
-          content: '',
-          type: 'directory',
-          size: 0,
-          children: [],
-        };
-        current.children?.push(child);
-      }
-
-      current = child;
-    }
-
-    current.children?.push(file);
-  }
-
-  return root;
-}
-
 export function compareDirectories(
   leftFiles: FileData[],
   rightFiles: FileData[]
@@ -315,11 +200,7 @@ export function compareDirectories(
     } else if (!leftFile && rightFile) {
       status = 'added';
     } else if (leftFile && rightFile) {
-      if (leftFile.content === rightFile.content) {
-        status = 'unchanged';
-      } else {
-        status = 'modified';
-      }
+      status = leftFile.content === rightFile.content ? 'unchanged' : 'modified';
     } else {
       continue;
     }
@@ -334,7 +215,6 @@ export function compareDirectories(
     });
   }
 
-  // Sort: directories first, then by name
   items.sort((a, b) => {
     if (a.type !== b.type) {
       return a.type === 'directory' ? -1 : 1;
