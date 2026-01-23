@@ -37,88 +37,14 @@ body {
   background: #6b7280;
 }
 
-/* Monaco editor overrides */
-.monaco-editor .view-overlays .current-line {
-  border: none !important;
+/* Hide scrollbar for gutter */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
-.monaco-editor .margin-view-overlays .current-line-margin {
-  border: none !important;
-}
-
-/* ===== Monaco Diff Editor - Beyond Compare Style ===== */
-
-/* Added lines (green) - right side */
-.monaco-editor .line-insert,
-.monaco-editor .cdr.line-insert {
-  background-color: rgba(35, 134, 54, 0.3) !important;
-}
-
-/* Deleted lines (red) - left side */
-.monaco-editor .line-delete,
-.monaco-editor .cdr.line-delete {
-  background-color: rgba(218, 54, 51, 0.3) !important;
-}
-
-/* Character-level insertions (bright green) */
-.monaco-editor .char-insert {
-  background-color: rgba(46, 160, 67, 0.6) !important;
-  border-radius: 2px;
-}
-
-/* Character-level deletions (bright red) */
-.monaco-editor .char-delete {
-  background-color: rgba(248, 81, 73, 0.6) !important;
-  border-radius: 2px;
-}
-
-/* Diff gutter decorations - make arrows more visible */
-.monaco-diff-editor .gutter-insert {
-  background-color: rgba(46, 160, 67, 0.5) !important;
-}
-
-.monaco-diff-editor .gutter-delete {
-  background-color: rgba(248, 81, 73, 0.5) !important;
-}
-
-/* Line number gutter for diff */
-.monaco-editor .margin-view-overlays .line-numbers {
-  color: #6b7280 !important;
-}
-
-/* Diff overview ruler (minimap-like strip on right) */
-.monaco-diff-editor .diffOverviewRuler {
-  background-color: #1f2937 !important;
-}
-
-/* Make modified region more visible with border */
-.monaco-editor .view-overlays .cdr {
-  border-left: 3px solid transparent !important;
-}
-
-.monaco-editor .line-insert {
-  border-left: 3px solid rgba(46, 160, 67, 0.8) !important;
-}
-
-.monaco-editor .line-delete {
-  border-left: 3px solid rgba(248, 81, 73, 0.8) !important;
-}
-
-/* Diagonal fill for unchanged areas in side-by-side mode */
-.monaco-diff-editor .diagonal-fill {
-  background-color: #1a1a2e !important;
-  opacity: 0.5;
-}
-
-/* Ensure diff editor background matches theme */
-.monaco-diff-editor .editor.original,
-.monaco-diff-editor .editor.modified {
-  background-color: #1e1e1e !important;
-}
-
-/* Middle separator in side-by-side view */
-.monaco-diff-editor .diffViewport {
-  background-color: #374151 !important;
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* File input directory attribute support */
