@@ -30,8 +30,21 @@ export interface CharDiff {
   side: 'left' | 'right';
 }
 
+// A block of consecutive diff lines (for grouping changes)
+export interface DiffBlock {
+  startIndex: number;
+  endIndex: number;
+  type: 'added' | 'removed' | 'modified' | 'unchanged';
+  leftLineStart: number | null;
+  leftLineEnd: number | null;
+  rightLineStart: number | null;
+  rightLineEnd: number | null;
+  lines: DiffLine[];
+}
+
 export interface DiffResult {
   lines: DiffLine[];
+  blocks: DiffBlock[];
   stats: DiffStats;
   isBinary: boolean;
 }

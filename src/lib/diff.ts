@@ -1,5 +1,5 @@
 import { diffLines, diffChars, diffWords } from 'diff';
-import type { DiffLine, DiffResult, DiffStats, CharDiff, HexDiffLine } from '@/types';
+import type { DiffLine, DiffResult, DiffStats, CharDiff, HexDiffLine, DiffBlock } from '@/types';
 
 export function computeTextDiff(leftText: string, rightText: string): DiffResult {
   const leftLines = leftText.split('\n');
@@ -103,8 +103,12 @@ export function computeTextDiff(leftText: string, rightText: string): DiffResult
     i++;
   }
 
+  // Compute diff blocks (consecutive lines of same type)
+  const blocks = computeDiffBlocks(diffLines2);
+
   return {
     lines: diffLines2,
+    blocks,
     stats,
     isBinary: false,
   };
@@ -233,4 +237,78 @@ export function findPrevDiffIndex(lines: DiffLine[], currentIndex: number): numb
   const indices = getDiffIndices(lines);
   const prev = [...indices].reverse().find((i) => i < currentIndex);
   return prev !== undefined ? prev : indices[indices.length - 1] ?? currentIndex;
+}
+
+// Compute diff blocks - groups of consecutive lines with the same change type
+export function computeDiffBlocks(lines: DiffLine[]): DiffBlock[] {
+  if (lines.length === 0) return [];
+
+  const blocks: DiffBlock[] = [];
+  let currentBlock: DiffBlock | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const blockType = line.type === 'unchanged' ? 'unchanged' :
+                      line.type === 'added' ? 'added' :
+                      line.type === 'removed' ? 'removed' : 'modified';
+
+    // Start new block if type changes or it's the first line
+    if (!currentBlock || currentBlock.type !== blockType) {
+      if (currentBlock) {
+        blocks.push(currentBlock);
+      }
+      currentBlock = {
+        startIndex: i,
+        endIndex: i,
+        type: blockType,
+        leftLineStart: line.lineNumber.left,
+        leftLineEnd: line.lineNumber.left,
+        rightLineStart: line.lineNumber.right,
+        rightLineEnd: line.lineNumber.right,
+        lines: [line],
+      };
+    } else {
+      // Extend current block
+      currentBlock.endIndex = i;
+      currentBlock.leftLineEnd = line.lineNumber.left ?? currentBlock.leftLineEnd;
+      currentBlock.rightLineEnd = line.lineNumber.right ?? currentBlock.rightLineEnd;
+      currentBlock.lines.push(line);
+    }
+  }
+
+  if (currentBlock) {
+    blocks.push(currentBlock);
+  }
+
+  return blocks;
+}
+
+// Get only diff blocks (non-unchanged)
+export function getDiffBlocks(blocks: DiffBlock[]): DiffBlock[] {
+  return blocks.filter(block => block.type !== 'unchanged');
+}
+
+// Find block index containing a line index
+export function findBlockByLineIndex(blocks: DiffBlock[], lineIndex: number): number {
+  return blocks.findIndex(block =>
+    lineIndex >= block.startIndex && lineIndex <= block.endIndex
+  );
+}
+
+// Get next diff block index
+export function findNextDiffBlockIndex(blocks: DiffBlock[], currentBlockIndex: number): number {
+  const diffBlocks = blocks.map((b, i) => ({ block: b, index: i }))
+    .filter(({ block }) => block.type !== 'unchanged');
+
+  const next = diffBlocks.find(({ index }) => index > currentBlockIndex);
+  return next?.index ?? diffBlocks[0]?.index ?? currentBlockIndex;
+}
+
+// Get previous diff block index
+export function findPrevDiffBlockIndex(blocks: DiffBlock[], currentBlockIndex: number): number {
+  const diffBlocks = blocks.map((b, i) => ({ block: b, index: i }))
+    .filter(({ block }) => block.type !== 'unchanged');
+
+  const prev = [...diffBlocks].reverse().find(({ index }) => index < currentBlockIndex);
+  return prev?.index ?? diffBlocks[diffBlocks.length - 1]?.index ?? currentBlockIndex;
 }

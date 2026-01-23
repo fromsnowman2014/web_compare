@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { FileDropzone, DropItem } from '@/components/FileDropzone';
-import { DiffViewer } from '@/components/DiffViewer';
+import { EnhancedDiffViewer } from '@/components/EnhancedDiffViewer';
 import { HexViewer } from '@/components/HexViewer';
 import { DirectoryViewer } from '@/components/DirectoryViewer';
 import { useCompareStore } from '@/store/compare';
@@ -335,7 +335,7 @@ export default function Home() {
               ) : viewMode === 'binary' ? (
                 <HexViewer />
               ) : (
-                <DiffViewer />
+                <EnhancedDiffViewer />
               )}
             </div>
           </div>
