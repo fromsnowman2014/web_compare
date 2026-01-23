@@ -11,7 +11,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  X,
+  Trash2,
   Eye,
   EyeOff,
   Download,
@@ -39,14 +39,15 @@ export function EnhancedDiffViewer() {
   const rightPanelRef = useRef<HTMLDivElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
 
-  // Compute diff when files change
+  // Compute diff from editedContent (not file content) so changes are reflected
   useEffect(() => {
     if (leftFile && rightFile && leftFile.type === 'text' && rightFile.type === 'text') {
-      const leftContent = typeof leftFile.content === 'string' ? leftFile.content : '';
-      const rightContent = typeof rightFile.content === 'string' ? rightFile.content : '';
+      // Use editedContent which gets updated when copy/delete operations occur
+      const leftContent = editedContent.left || (typeof leftFile.content === 'string' ? leftFile.content : '');
+      const rightContent = editedContent.right || (typeof rightFile.content === 'string' ? rightFile.content : '');
       setDiffResult(computeTextDiff(leftContent, rightContent));
     }
-  }, [leftFile, rightFile, setDiffResult]);
+  }, [leftFile, rightFile, editedContent.left, editedContent.right, setDiffResult]);
 
   const diffBlocks = useMemo(() => {
     return diffResult?.blocks ? getDiffBlocks(diffResult.blocks) : [];
@@ -120,55 +121,88 @@ export function EnhancedDiffViewer() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [goToNextBlock, goToPrevBlock]);
 
+  // Copy block from right to left
   const copyBlockToLeft = useCallback((blockIndex: number) => {
-    if (!diffResult?.blocks || !editedContent) return;
+    if (!diffResult?.blocks) return;
     const block = diffResult.blocks[blockIndex];
     if (!block || block.type === 'unchanged') return;
 
     const leftLines = editedContent.left.split('\n');
-    const rightContent = block.lines.map(l => l.content.right).filter(c => c !== '');
+    const rightContent = block.lines
+      .filter(l => l.content.right !== '' || l.type === 'modified')
+      .map(l => l.content.right);
 
     if (block.type === 'added') {
+      // Insert added lines from right into left at the appropriate position
       const insertPos = block.leftLineStart ? block.leftLineStart - 1 : leftLines.length;
       leftLines.splice(insertPos, 0, ...rightContent);
     } else if (block.type === 'modified' && block.leftLineStart && block.leftLineEnd) {
-      leftLines.splice(block.leftLineStart - 1, block.leftLineEnd - block.leftLineStart + 1, ...rightContent);
+      // Replace left content with right content
+      const deleteCount = block.leftLineEnd - block.leftLineStart + 1;
+      leftLines.splice(block.leftLineStart - 1, deleteCount, ...rightContent);
+    } else if (block.type === 'removed') {
+      // For removed blocks, copying to left means keeping what's already there (no-op)
+      // But if user wants to "accept" the removal, they should use delete
+      return;
     }
 
     updateEditedContent('left', leftLines.join('\n'));
-  }, [diffResult, editedContent, updateEditedContent]);
+  }, [diffResult, editedContent.left, updateEditedContent]);
 
+  // Copy block from left to right
   const copyBlockToRight = useCallback((blockIndex: number) => {
-    if (!diffResult?.blocks || !editedContent) return;
+    if (!diffResult?.blocks) return;
     const block = diffResult.blocks[blockIndex];
     if (!block || block.type === 'unchanged') return;
 
     const rightLines = editedContent.right.split('\n');
-    const leftContent = block.lines.map(l => l.content.left).filter(c => c !== '');
+    const leftContent = block.lines
+      .filter(l => l.content.left !== '' || l.type === 'modified')
+      .map(l => l.content.left);
 
     if (block.type === 'removed') {
+      // Insert removed lines from left into right at the appropriate position
       const insertPos = block.rightLineStart ? block.rightLineStart - 1 : rightLines.length;
       rightLines.splice(insertPos, 0, ...leftContent);
-    } else if (block.type === 'added' && block.rightLineStart && block.rightLineEnd) {
-      rightLines.splice(block.rightLineStart - 1, block.rightLineEnd - block.rightLineStart + 1);
     } else if (block.type === 'modified' && block.rightLineStart && block.rightLineEnd) {
-      rightLines.splice(block.rightLineStart - 1, block.rightLineEnd - block.rightLineStart + 1, ...leftContent);
+      // Replace right content with left content
+      const deleteCount = block.rightLineEnd - block.rightLineStart + 1;
+      rightLines.splice(block.rightLineStart - 1, deleteCount, ...leftContent);
+    } else if (block.type === 'added') {
+      // For added blocks, copying to right means keeping what's already there (no-op)
+      return;
     }
 
     updateEditedContent('right', rightLines.join('\n'));
-  }, [diffResult, editedContent, updateEditedContent]);
+  }, [diffResult, editedContent.right, updateEditedContent]);
 
+  // Delete block from left side
   const deleteBlockFromLeft = useCallback((blockIndex: number) => {
-    if (!diffResult?.blocks || !editedContent) return;
+    if (!diffResult?.blocks) return;
     const block = diffResult.blocks[blockIndex];
     if (!block || block.type === 'unchanged' || block.type === 'added') return;
 
     if (block.leftLineStart && block.leftLineEnd) {
       const leftLines = editedContent.left.split('\n');
-      leftLines.splice(block.leftLineStart - 1, block.leftLineEnd - block.leftLineStart + 1);
+      const deleteCount = block.leftLineEnd - block.leftLineStart + 1;
+      leftLines.splice(block.leftLineStart - 1, deleteCount);
       updateEditedContent('left', leftLines.join('\n'));
     }
-  }, [diffResult, editedContent, updateEditedContent]);
+  }, [diffResult, editedContent.left, updateEditedContent]);
+
+  // Delete block from right side
+  const deleteBlockFromRight = useCallback((blockIndex: number) => {
+    if (!diffResult?.blocks) return;
+    const block = diffResult.blocks[blockIndex];
+    if (!block || block.type === 'unchanged' || block.type === 'removed') return;
+
+    if (block.rightLineStart && block.rightLineEnd) {
+      const rightLines = editedContent.right.split('\n');
+      const deleteCount = block.rightLineEnd - block.rightLineStart + 1;
+      rightLines.splice(block.rightLineStart - 1, deleteCount);
+      updateEditedContent('right', rightLines.join('\n'));
+    }
+  }, [diffResult, editedContent.right, updateEditedContent]);
 
   const handleDownloadLeft = useCallback(() => {
     if (leftFile) downloadFile(editedContent.left, leftFile.name);
@@ -288,54 +322,76 @@ export function EnhancedDiffViewer() {
           </div>
         </div>
 
-        {/* Center gutter */}
+        {/* Center gutter with action buttons */}
         <div
           ref={gutterRef}
-          className="w-12 bg-gray-800 border-x border-gray-700 overflow-auto flex-shrink-0"
+          className="w-14 bg-gray-800 border-x border-gray-700 overflow-auto flex-shrink-0"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           <div style={{ minHeight: displayLines.length * LINE_HEIGHT }} className="relative">
             {diffResult?.blocks.map((block, blockIndex) => {
               if (block.type === 'unchanged') return null;
 
+              // Determine which buttons to show based on block type
+              const showCopyToLeft = block.type === 'added' || block.type === 'modified';
+              const showCopyToRight = block.type === 'removed' || block.type === 'modified';
+              const showDeleteLeft = block.type === 'removed' || block.type === 'modified';
+              const showDeleteRight = block.type === 'added' || block.type === 'modified';
+
               return (
                 <div
                   key={blockIndex}
-                  className="absolute flex flex-col items-center justify-center gap-0.5"
+                  className="absolute flex flex-col items-center justify-center gap-0.5 py-0.5"
                   style={{
                     top: block.startIndex * LINE_HEIGHT,
                     height: block.lines.length * LINE_HEIGHT,
-                    width: 48,
+                    width: 56,
                     left: 0,
                   }}
                 >
-                  {(block.type === 'added' || block.type === 'modified') && (
-                    <button
-                      onClick={() => copyBlockToLeft(blockIndex)}
-                      className="p-0.5 bg-blue-600 hover:bg-blue-500 rounded text-white"
-                      title="Copy to left"
-                    >
-                      <ChevronLeft className="w-3 h-3" />
-                    </button>
-                  )}
-                  {(block.type === 'removed' || block.type === 'modified') && (
-                    <button
-                      onClick={() => copyBlockToRight(blockIndex)}
-                      className="p-0.5 bg-green-600 hover:bg-green-500 rounded text-white"
-                      title="Copy to right"
-                    >
-                      <ChevronRight className="w-3 h-3" />
-                    </button>
-                  )}
-                  {(block.type === 'removed' || block.type === 'modified') && (
-                    <button
-                      onClick={() => deleteBlockFromLeft(blockIndex)}
-                      className="p-0.5 bg-red-600 hover:bg-red-500 rounded text-white"
-                      title="Delete from left"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
+                  {/* Copy buttons row */}
+                  <div className="flex gap-0.5">
+                    {showCopyToLeft && (
+                      <button
+                        onClick={() => copyBlockToLeft(blockIndex)}
+                        className="p-0.5 bg-blue-600 hover:bg-blue-500 rounded text-white"
+                        title="Copy to left (←)"
+                      >
+                        <ChevronLeft className="w-3 h-3" />
+                      </button>
+                    )}
+                    {showCopyToRight && (
+                      <button
+                        onClick={() => copyBlockToRight(blockIndex)}
+                        className="p-0.5 bg-green-600 hover:bg-green-500 rounded text-white"
+                        title="Copy to right (→)"
+                      >
+                        <ChevronRight className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Delete buttons row */}
+                  <div className="flex gap-0.5">
+                    {showDeleteLeft && (
+                      <button
+                        onClick={() => deleteBlockFromLeft(blockIndex)}
+                        className="p-0.5 bg-red-700 hover:bg-red-600 rounded text-white"
+                        title="Delete from left"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                    {showDeleteRight && (
+                      <button
+                        onClick={() => deleteBlockFromRight(blockIndex)}
+                        className="p-0.5 bg-red-500 hover:bg-red-400 rounded text-white"
+                        title="Delete from right"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
