@@ -298,79 +298,89 @@ export function DiffViewer() {
         </div>
       )}
 
-      {/* Editor */}
-      <div className="flex-1 min-h-0">
-        {editMode ? (
-          <div className="flex h-full">
-            {/* Left editor */}
-            <div className="flex-1 border-r border-gray-700">
-              <div className="px-3 py-1.5 bg-gray-800 border-b border-gray-700 text-sm text-gray-400">
-                {leftFile?.name || 'Left'}
+      {/* Editor - use absolute positioning for reliable height */}
+      <div className="flex-1 min-h-0 relative">
+        <div className="absolute inset-0">
+          {editMode ? (
+            <div className="flex h-full">
+              {/* Left editor */}
+              <div className="flex-1 flex flex-col border-r border-gray-700">
+                <div className="px-3 py-1.5 bg-gray-800 border-b border-gray-700 text-sm text-gray-400 flex-shrink-0">
+                  {leftFile?.name || 'Left'}
+                </div>
+                <div className="flex-1 relative">
+                  <div className="absolute inset-0">
+                    <Editor
+                      height="100%"
+                      language={language}
+                      theme="vs-dark"
+                      value={editedContent.left}
+                      onChange={(value) => updateEditedContent('left', value || '')}
+                      onMount={handleLeftEditorMount}
+                      options={{
+                        minimap: { enabled: false },
+                        fontSize: 13,
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        renderWhitespace: 'selection',
+                        wordWrap: 'off',
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
-              <Editor
-                height="calc(100% - 36px)"
-                language={language}
-                theme="vs-dark"
-                value={editedContent.left}
-                onChange={(value) => updateEditedContent('left', value || '')}
-                onMount={handleLeftEditorMount}
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 13,
-                  lineNumbers: 'on',
-                  scrollBeyondLastLine: false,
-                  renderWhitespace: 'selection',
-                  wordWrap: 'off',
-                }}
-              />
-            </div>
-            {/* Right editor */}
-            <div className="flex-1">
-              <div className="px-3 py-1.5 bg-gray-800 border-b border-gray-700 text-sm text-gray-400">
-                {rightFile?.name || 'Right'}
+              {/* Right editor */}
+              <div className="flex-1 flex flex-col">
+                <div className="px-3 py-1.5 bg-gray-800 border-b border-gray-700 text-sm text-gray-400 flex-shrink-0">
+                  {rightFile?.name || 'Right'}
+                </div>
+                <div className="flex-1 relative">
+                  <div className="absolute inset-0">
+                    <Editor
+                      height="100%"
+                      language={language}
+                      theme="vs-dark"
+                      value={editedContent.right}
+                      onChange={(value) => updateEditedContent('right', value || '')}
+                      onMount={handleRightEditorMount}
+                      options={{
+                        minimap: { enabled: false },
+                        fontSize: 13,
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        renderWhitespace: 'selection',
+                        wordWrap: 'off',
+                      }}
+                    />
+                  </div>
+                </div>
               </div>
-              <Editor
-                height="calc(100% - 36px)"
-                language={language}
-                theme="vs-dark"
-                value={editedContent.right}
-                onChange={(value) => updateEditedContent('right', value || '')}
-                onMount={handleRightEditorMount}
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 13,
-                  lineNumbers: 'on',
-                  scrollBeyondLastLine: false,
-                  renderWhitespace: 'selection',
-                  wordWrap: 'off',
-                }}
-              />
             </div>
-          </div>
-        ) : (
-          <DiffEditor
-            height="100%"
-            language={language}
-            theme="vs-dark"
-            original={leftContent}
-            modified={rightContent}
-            onMount={handleDiffEditorMount}
-            options={{
-              renderSideBySide: viewMode === 'side-by-side',
-              minimap: { enabled: false },
-              fontSize: 13,
-              lineNumbers: 'on',
-              scrollBeyondLastLine: false,
-              renderWhitespace: 'selection',
-              readOnly: true,
-              originalEditable: false,
-              enableSplitViewResizing: true,
-              ignoreTrimWhitespace: false,
-              renderIndicators: true,
-              renderMarginRevertIcon: false,
-            }}
-          />
-        )}
+          ) : (
+            <DiffEditor
+              height="100%"
+              language={language}
+              theme="vs-dark"
+              original={leftContent}
+              modified={rightContent}
+              onMount={handleDiffEditorMount}
+              options={{
+                renderSideBySide: viewMode === 'side-by-side',
+                minimap: { enabled: false },
+                fontSize: 13,
+                lineNumbers: 'on',
+                scrollBeyondLastLine: false,
+                renderWhitespace: 'selection',
+                readOnly: true,
+                originalEditable: false,
+                enableSplitViewResizing: true,
+                ignoreTrimWhitespace: false,
+                renderIndicators: true,
+                renderMarginRevertIcon: false,
+              }}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
