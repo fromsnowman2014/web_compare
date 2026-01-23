@@ -5,7 +5,7 @@ import { useCompareStore } from '@/store/compare';
 import { computeTextDiff, getDiffBlocks, findNextDiffBlockIndex, findPrevDiffBlockIndex } from '@/lib/diff';
 import { cn, formatBytes } from '@/lib/utils';
 import { downloadFile } from '@/lib/file';
-import type { DiffLine, FileData } from '@/types';
+import type { DiffLine, DiffBlock, FileData } from '@/types';
 import {
   ChevronUp,
   ChevronDown,
@@ -121,60 +121,89 @@ export function EnhancedDiffViewer() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [goToNextBlock, goToPrevBlock]);
 
+  // Find insertion position for added blocks (where to insert in left)
+  const findLeftInsertPosition = useCallback((block: DiffBlock) => {
+    if (!diffResult?.lines) return 0;
+
+    // Look backwards from block start to find last line with left line number
+    for (let i = block.startIndex - 1; i >= 0; i--) {
+      const line = diffResult.lines[i];
+      if (line.lineNumber.left !== null) {
+        return line.lineNumber.left; // Insert after this line (0-indexed = line number)
+      }
+    }
+    return 0; // Insert at beginning
+  }, [diffResult]);
+
+  // Find insertion position for removed blocks (where to insert in right)
+  const findRightInsertPosition = useCallback((block: DiffBlock) => {
+    if (!diffResult?.lines) return 0;
+
+    // Look backwards from block start to find last line with right line number
+    for (let i = block.startIndex - 1; i >= 0; i--) {
+      const line = diffResult.lines[i];
+      if (line.lineNumber.right !== null) {
+        return line.lineNumber.right; // Insert after this line
+      }
+    }
+    return 0; // Insert at beginning
+  }, [diffResult]);
+
   // Copy block from right to left
   const copyBlockToLeft = useCallback((blockIndex: number) => {
     if (!diffResult?.blocks) return;
     const block = diffResult.blocks[blockIndex];
-    if (!block || block.type === 'unchanged') return;
+    if (!block || block.type === 'unchanged' || block.type === 'removed') return;
 
     const leftLines = editedContent.left.split('\n');
+
+    // Get content from right side
     const rightContent = block.lines
-      .filter(l => l.content.right !== '' || l.type === 'modified')
-      .map(l => l.content.right);
+      .map(l => l.content.right)
+      .filter(content => content !== '');
+
+    if (rightContent.length === 0) return;
 
     if (block.type === 'added') {
-      // Insert added lines from right into left at the appropriate position
-      const insertPos = block.leftLineStart ? block.leftLineStart - 1 : leftLines.length;
+      // Insert added lines from right into left
+      const insertPos = findLeftInsertPosition(block);
       leftLines.splice(insertPos, 0, ...rightContent);
     } else if (block.type === 'modified' && block.leftLineStart && block.leftLineEnd) {
       // Replace left content with right content
       const deleteCount = block.leftLineEnd - block.leftLineStart + 1;
       leftLines.splice(block.leftLineStart - 1, deleteCount, ...rightContent);
-    } else if (block.type === 'removed') {
-      // For removed blocks, copying to left means keeping what's already there (no-op)
-      // But if user wants to "accept" the removal, they should use delete
-      return;
     }
 
     updateEditedContent('left', leftLines.join('\n'));
-  }, [diffResult, editedContent.left, updateEditedContent]);
+  }, [diffResult, editedContent.left, updateEditedContent, findLeftInsertPosition]);
 
   // Copy block from left to right
   const copyBlockToRight = useCallback((blockIndex: number) => {
     if (!diffResult?.blocks) return;
     const block = diffResult.blocks[blockIndex];
-    if (!block || block.type === 'unchanged') return;
+    if (!block || block.type === 'unchanged' || block.type === 'added') return;
 
     const rightLines = editedContent.right.split('\n');
+
+    // Get content from left side
     const leftContent = block.lines
-      .filter(l => l.content.left !== '' || l.type === 'modified')
-      .map(l => l.content.left);
+      .map(l => l.content.left)
+      .filter(content => content !== '');
+
+    if (leftContent.length === 0) return;
 
     if (block.type === 'removed') {
-      // Insert removed lines from left into right at the appropriate position
-      const insertPos = block.rightLineStart ? block.rightLineStart - 1 : rightLines.length;
+      // Insert removed lines from left into right
+      const insertPos = findRightInsertPosition(block);
       rightLines.splice(insertPos, 0, ...leftContent);
     } else if (block.type === 'modified' && block.rightLineStart && block.rightLineEnd) {
       // Replace right content with left content
       const deleteCount = block.rightLineEnd - block.rightLineStart + 1;
       rightLines.splice(block.rightLineStart - 1, deleteCount, ...leftContent);
-    } else if (block.type === 'added') {
-      // For added blocks, copying to right means keeping what's already there (no-op)
-      return;
     }
 
     updateEditedContent('right', rightLines.join('\n'));
-  }, [diffResult, editedContent.right, updateEditedContent]);
+  }, [diffResult, editedContent.right, updateEditedContent, findRightInsertPosition]);
 
   // Delete block from left side
   const deleteBlockFromLeft = useCallback((blockIndex: number) => {
@@ -182,7 +211,7 @@ export function EnhancedDiffViewer() {
     const block = diffResult.blocks[blockIndex];
     if (!block || block.type === 'unchanged' || block.type === 'added') return;
 
-    if (block.leftLineStart && block.leftLineEnd) {
+    if (block.leftLineStart !== null && block.leftLineEnd !== null) {
       const leftLines = editedContent.left.split('\n');
       const deleteCount = block.leftLineEnd - block.leftLineStart + 1;
       leftLines.splice(block.leftLineStart - 1, deleteCount);
@@ -196,7 +225,7 @@ export function EnhancedDiffViewer() {
     const block = diffResult.blocks[blockIndex];
     if (!block || block.type === 'unchanged' || block.type === 'removed') return;
 
-    if (block.rightLineStart && block.rightLineEnd) {
+    if (block.rightLineStart !== null && block.rightLineEnd !== null) {
       const rightLines = editedContent.right.split('\n');
       const deleteCount = block.rightLineEnd - block.rightLineStart + 1;
       rightLines.splice(block.rightLineStart - 1, deleteCount);
