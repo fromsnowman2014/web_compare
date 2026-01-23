@@ -43,7 +43,9 @@ export function DiffViewer() {
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
   const leftEditorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const rightEditorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [diffIndices, setDiffIndices] = useState<number[]>([]);
+  const [containerHeight, setContainerHeight] = useState<number>(400);
 
   const language = leftFile
     ? getLanguageFromFilename(leftFile.name)
@@ -51,12 +53,47 @@ export function DiffViewer() {
     ? getLanguageFromFilename(rightFile.name)
     : 'plaintext';
 
+  // Measure container height for Monaco Editor
+  useEffect(() => {
+    const updateHeight = () => {
+      if (containerRef.current) {
+        const height = containerRef.current.clientHeight;
+        console.log('[DiffViewer] Container height:', height);
+        if (height > 0) {
+          setContainerHeight(height);
+        }
+      }
+    };
+
+    updateHeight();
+    window.addEventListener('resize', updateHeight);
+
+    // Also update after a short delay to handle layout shifts
+    const timeout = setTimeout(updateHeight, 100);
+
+    return () => {
+      window.removeEventListener('resize', updateHeight);
+      clearTimeout(timeout);
+    };
+  }, []);
+
   // Compute diff when files change
   useEffect(() => {
+    console.log('[DiffViewer] Files changed:', {
+      leftFile: leftFile?.name,
+      leftType: leftFile?.type,
+      leftContentLength: typeof leftFile?.content === 'string' ? leftFile.content.length : 'binary',
+      rightFile: rightFile?.name,
+      rightType: rightFile?.type,
+      rightContentLength: typeof rightFile?.content === 'string' ? rightFile.content.length : 'binary',
+    });
+
     if (leftFile && rightFile && leftFile.type === 'text' && rightFile.type === 'text') {
       const leftContent = typeof leftFile.content === 'string' ? leftFile.content : '';
       const rightContent = typeof rightFile.content === 'string' ? rightFile.content : '';
+      console.log('[DiffViewer] Computing diff, left length:', leftContent.length, 'right length:', rightContent.length);
       const result = computeTextDiff(leftContent, rightContent);
+      console.log('[DiffViewer] Diff result:', result.stats);
       setDiffResult(result);
     }
   }, [leftFile, rightFile, setDiffResult]);
@@ -100,7 +137,14 @@ export function DiffViewer() {
 
   const handleDiffEditorMount = useCallback(
     (editor: editor.IStandaloneDiffEditor) => {
+      console.log('[DiffViewer] DiffEditor mounted!');
       diffEditorRef.current = editor;
+
+      // Force layout update after mount
+      setTimeout(() => {
+        editor.layout();
+        console.log('[DiffViewer] Layout updated');
+      }, 0);
 
       // Enable synchronized scrolling
       if (syncScroll) {
@@ -298,89 +342,90 @@ export function DiffViewer() {
         </div>
       )}
 
-      {/* Editor - use absolute positioning for reliable height */}
-      <div className="flex-1 min-h-0 relative">
-        <div className="absolute inset-0">
-          {editMode ? (
-            <div className="flex h-full">
-              {/* Left editor */}
-              <div className="flex-1 flex flex-col border-r border-gray-700">
-                <div className="px-3 py-1.5 bg-gray-800 border-b border-gray-700 text-sm text-gray-400 flex-shrink-0">
-                  {leftFile?.name || 'Left'}
-                </div>
-                <div className="flex-1 relative">
-                  <div className="absolute inset-0">
-                    <Editor
-                      height="100%"
-                      language={language}
-                      theme="vs-dark"
-                      value={editedContent.left}
-                      onChange={(value) => updateEditedContent('left', value || '')}
-                      onMount={handleLeftEditorMount}
-                      options={{
-                        minimap: { enabled: false },
-                        fontSize: 13,
-                        lineNumbers: 'on',
-                        scrollBeyondLastLine: false,
-                        renderWhitespace: 'selection',
-                        wordWrap: 'off',
-                      }}
-                    />
-                  </div>
-                </div>
+      {/* Editor container with measured height */}
+      <div
+        ref={containerRef}
+        className="flex-1 min-h-0"
+        style={{ minHeight: '200px' }}
+      >
+        {editMode ? (
+          <div className="flex h-full">
+            {/* Left editor */}
+            <div className="flex-1 flex flex-col border-r border-gray-700">
+              <div className="px-3 py-1.5 bg-gray-800 border-b border-gray-700 text-sm text-gray-400 flex-shrink-0">
+                {leftFile?.name || 'Left'}
               </div>
-              {/* Right editor */}
-              <div className="flex-1 flex flex-col">
-                <div className="px-3 py-1.5 bg-gray-800 border-b border-gray-700 text-sm text-gray-400 flex-shrink-0">
-                  {rightFile?.name || 'Right'}
-                </div>
-                <div className="flex-1 relative">
-                  <div className="absolute inset-0">
-                    <Editor
-                      height="100%"
-                      language={language}
-                      theme="vs-dark"
-                      value={editedContent.right}
-                      onChange={(value) => updateEditedContent('right', value || '')}
-                      onMount={handleRightEditorMount}
-                      options={{
-                        minimap: { enabled: false },
-                        fontSize: 13,
-                        lineNumbers: 'on',
-                        scrollBeyondLastLine: false,
-                        renderWhitespace: 'selection',
-                        wordWrap: 'off',
-                      }}
-                    />
-                  </div>
-                </div>
+              <div className="flex-1">
+                <Editor
+                  height={`${containerHeight - 36}px`}
+                  language={language}
+                  theme="vs-dark"
+                  value={editedContent.left}
+                  onChange={(value) => updateEditedContent('left', value || '')}
+                  onMount={handleLeftEditorMount}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    lineNumbers: 'on',
+                    scrollBeyondLastLine: false,
+                    renderWhitespace: 'selection',
+                    wordWrap: 'off',
+                    automaticLayout: true,
+                  }}
+                />
               </div>
             </div>
-          ) : (
-            <DiffEditor
-              height="100%"
-              language={language}
-              theme="vs-dark"
-              original={leftContent}
-              modified={rightContent}
-              onMount={handleDiffEditorMount}
-              options={{
-                renderSideBySide: viewMode === 'side-by-side',
-                minimap: { enabled: false },
-                fontSize: 13,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                renderWhitespace: 'selection',
-                readOnly: true,
-                originalEditable: false,
-                enableSplitViewResizing: true,
-                ignoreTrimWhitespace: false,
-                renderIndicators: true,
-                renderMarginRevertIcon: false,
-              }}
-            />
-          )}
-        </div>
+            {/* Right editor */}
+            <div className="flex-1 flex flex-col">
+              <div className="px-3 py-1.5 bg-gray-800 border-b border-gray-700 text-sm text-gray-400 flex-shrink-0">
+                {rightFile?.name || 'Right'}
+              </div>
+              <div className="flex-1">
+                <Editor
+                  height={`${containerHeight - 36}px`}
+                  language={language}
+                  theme="vs-dark"
+                  value={editedContent.right}
+                  onChange={(value) => updateEditedContent('right', value || '')}
+                  onMount={handleRightEditorMount}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    lineNumbers: 'on',
+                    scrollBeyondLastLine: false,
+                    renderWhitespace: 'selection',
+                    wordWrap: 'off',
+                    automaticLayout: true,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <DiffEditor
+            height={`${containerHeight}px`}
+            language={language}
+            theme="vs-dark"
+            original={leftContent}
+            modified={rightContent}
+            onMount={handleDiffEditorMount}
+            options={{
+              renderSideBySide: viewMode === 'side-by-side',
+              minimap: { enabled: false },
+              fontSize: 13,
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              renderWhitespace: 'selection',
+              readOnly: true,
+              originalEditable: false,
+              enableSplitViewResizing: true,
+              ignoreTrimWhitespace: false,
+              renderIndicators: true,
+              renderMarginRevertIcon: false,
+              automaticLayout: true,
+            }}
+          />
+        )}
       </div>
     </div>
   );

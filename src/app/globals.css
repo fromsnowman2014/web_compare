@@ -125,13 +125,3 @@ body {
 input[type="file"]::-webkit-file-upload-button {
   display: none;
 }
-
-/* Ensure Monaco editor fills container properly */
-.monaco-editor,
-.monaco-diff-editor {
-  position: absolute !important;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-}
