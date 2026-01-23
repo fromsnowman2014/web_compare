@@ -16,6 +16,8 @@ import {
   EyeOff,
   Download,
   FileText,
+  Edit3,
+  GitCompare,
 } from 'lucide-react';
 
 const LINE_HEIGHT = 20;
@@ -34,15 +36,17 @@ export function EnhancedDiffViewer() {
 
   const [showOnlyDiffs, setShowOnlyDiffs] = useState(false);
   const [currentBlockIndex, setCurrentBlockIndex] = useState(0);
+  const [editMode, setEditMode] = useState(false);
 
   const leftPanelRef = useRef<HTMLDivElement>(null);
   const rightPanelRef = useRef<HTMLDivElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
+  const leftTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const rightTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Compute diff from editedContent (not file content) so changes are reflected
   useEffect(() => {
     if (leftFile && rightFile && leftFile.type === 'text' && rightFile.type === 'text') {
-      // Use editedContent which gets updated when copy/delete operations occur
       const leftContent = editedContent.left || (typeof leftFile.content === 'string' ? leftFile.content : '');
       const rightContent = editedContent.right || (typeof rightFile.content === 'string' ? rightFile.content : '');
       setDiffResult(computeTextDiff(leftContent, rightContent));
@@ -73,6 +77,7 @@ export function EnhancedDiffViewer() {
     return diffResult.lines.filter((_, index) => visibleIndices.has(index));
   }, [diffResult, showOnlyDiffs]);
 
+  // Synchronized scrolling for diff view
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>, source: 'left' | 'right') => {
     if (!syncScroll) return;
     const scrollTop = e.currentTarget.scrollTop;
@@ -83,6 +88,18 @@ export function EnhancedDiffViewer() {
       if (leftPanelRef.current) leftPanelRef.current.scrollTop = scrollTop;
     }
     if (gutterRef.current) gutterRef.current.scrollTop = scrollTop;
+  }, [syncScroll]);
+
+  // Synchronized scrolling for edit mode
+  const handleEditScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>, source: 'left' | 'right') => {
+    if (!syncScroll) return;
+    const scrollTop = e.currentTarget.scrollTop;
+
+    if (source === 'left' && rightTextareaRef.current) {
+      rightTextareaRef.current.scrollTop = scrollTop;
+    } else if (source === 'right' && leftTextareaRef.current) {
+      leftTextareaRef.current.scrollTop = scrollTop;
+    }
   }, [syncScroll]);
 
   const scrollToBlock = useCallback((blockIndex: number) => {
@@ -112,6 +129,10 @@ export function EnhancedDiffViewer() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept shortcuts when in edit mode and typing
+      if (editMode && (e.target instanceof HTMLTextAreaElement)) {
+        return;
+      }
       if (e.key === 'F7') {
         e.preventDefault();
         e.shiftKey ? goToPrevBlock() : goToNextBlock();
@@ -119,34 +140,32 @@ export function EnhancedDiffViewer() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [goToNextBlock, goToPrevBlock]);
+  }, [goToNextBlock, goToPrevBlock, editMode]);
 
   // Find insertion position for added blocks (where to insert in left)
   const findLeftInsertPosition = useCallback((block: DiffBlock) => {
     if (!diffResult?.lines) return 0;
 
-    // Look backwards from block start to find last line with left line number
     for (let i = block.startIndex - 1; i >= 0; i--) {
       const line = diffResult.lines[i];
       if (line.lineNumber.left !== null) {
-        return line.lineNumber.left; // Insert after this line (0-indexed = line number)
+        return line.lineNumber.left;
       }
     }
-    return 0; // Insert at beginning
+    return 0;
   }, [diffResult]);
 
   // Find insertion position for removed blocks (where to insert in right)
   const findRightInsertPosition = useCallback((block: DiffBlock) => {
     if (!diffResult?.lines) return 0;
 
-    // Look backwards from block start to find last line with right line number
     for (let i = block.startIndex - 1; i >= 0; i--) {
       const line = diffResult.lines[i];
       if (line.lineNumber.right !== null) {
-        return line.lineNumber.right; // Insert after this line
+        return line.lineNumber.right;
       }
     }
-    return 0; // Insert at beginning
+    return 0;
   }, [diffResult]);
 
   // Copy block from right to left
@@ -156,8 +175,6 @@ export function EnhancedDiffViewer() {
     if (!block || block.type === 'unchanged' || block.type === 'removed') return;
 
     const leftLines = editedContent.left.split('\n');
-
-    // Get content from right side
     const rightContent = block.lines
       .map(l => l.content.right)
       .filter(content => content !== '');
@@ -165,11 +182,9 @@ export function EnhancedDiffViewer() {
     if (rightContent.length === 0) return;
 
     if (block.type === 'added') {
-      // Insert added lines from right into left
       const insertPos = findLeftInsertPosition(block);
       leftLines.splice(insertPos, 0, ...rightContent);
     } else if (block.type === 'modified' && block.leftLineStart && block.leftLineEnd) {
-      // Replace left content with right content
       const deleteCount = block.leftLineEnd - block.leftLineStart + 1;
       leftLines.splice(block.leftLineStart - 1, deleteCount, ...rightContent);
     }
@@ -184,8 +199,6 @@ export function EnhancedDiffViewer() {
     if (!block || block.type === 'unchanged' || block.type === 'added') return;
 
     const rightLines = editedContent.right.split('\n');
-
-    // Get content from left side
     const leftContent = block.lines
       .map(l => l.content.left)
       .filter(content => content !== '');
@@ -193,11 +206,9 @@ export function EnhancedDiffViewer() {
     if (leftContent.length === 0) return;
 
     if (block.type === 'removed') {
-      // Insert removed lines from left into right
       const insertPos = findRightInsertPosition(block);
       rightLines.splice(insertPos, 0, ...leftContent);
     } else if (block.type === 'modified' && block.rightLineStart && block.rightLineEnd) {
-      // Replace right content with left content
       const deleteCount = block.rightLineEnd - block.rightLineStart + 1;
       rightLines.splice(block.rightLineStart - 1, deleteCount, ...leftContent);
     }
@@ -241,6 +252,15 @@ export function EnhancedDiffViewer() {
     if (rightFile) downloadFile(editedContent.right, rightFile.name);
   }, [rightFile, editedContent.right]);
 
+  // Handle text changes in edit mode
+  const handleLeftTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    updateEditedContent('left', e.target.value);
+  }, [updateEditedContent]);
+
+  const handleRightTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    updateEditedContent('right', e.target.value);
+  }, [updateEditedContent]);
+
   if (!leftFile && !rightFile) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-500">
@@ -260,39 +280,68 @@ export function EnhancedDiffViewer() {
       {/* Toolbar */}
       <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
         <div className="flex items-center gap-2">
+          {/* Edit/Diff mode toggle */}
           <button
-            onClick={goToPrevBlock}
-            className="p-2 hover:bg-gray-700 rounded transition-colors"
-            title="Previous difference (Shift+F7)"
+            onClick={() => setEditMode(!editMode)}
+            className={cn(
+              'flex items-center gap-2 px-3 py-1.5 text-sm rounded transition-colors',
+              editMode ? 'bg-orange-600 text-white' : 'hover:bg-gray-700'
+            )}
+            title={editMode ? 'Switch to Diff View' : 'Switch to Edit Mode'}
           >
-            <ChevronUp className="w-4 h-4" />
+            {editMode ? <GitCompare className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
+            {editMode ? 'Diff View' : 'Edit Mode'}
           </button>
-          <span className="text-sm text-gray-400 min-w-[100px] text-center">
-            {diffBlocks.length > 0
-              ? `Section ${currentBlockIndex + 1} / ${diffBlocks.length}`
-              : 'No differences'}
-          </span>
-          <button
-            onClick={goToNextBlock}
-            className="p-2 hover:bg-gray-700 rounded transition-colors"
-            title="Next difference (F7)"
-          >
-            <ChevronDown className="w-4 h-4" />
-          </button>
+
+          <div className="w-px h-6 bg-gray-600 mx-2" />
+
+          {/* Navigation - only show in diff mode */}
+          {!editMode && (
+            <>
+              <button
+                onClick={goToPrevBlock}
+                className="p-2 hover:bg-gray-700 rounded transition-colors"
+                title="Previous difference (Shift+F7)"
+              >
+                <ChevronUp className="w-4 h-4" />
+              </button>
+              <span className="text-sm text-gray-400 min-w-[100px] text-center">
+                {diffBlocks.length > 0
+                  ? `Section ${currentBlockIndex + 1} / ${diffBlocks.length}`
+                  : 'No differences'}
+              </span>
+              <button
+                onClick={goToNextBlock}
+                className="p-2 hover:bg-gray-700 rounded transition-colors"
+                title="Next difference (F7)"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
+            </>
+          )}
+
+          {editMode && (
+            <span className="text-sm text-orange-400">
+              Editing - changes update diff in real-time
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-4">
-          <button
-            onClick={() => setShowOnlyDiffs(!showOnlyDiffs)}
-            className={cn(
-              'flex items-center gap-2 px-3 py-1.5 text-sm rounded transition-colors',
-              showOnlyDiffs ? 'bg-blue-600 text-white' : 'hover:bg-gray-700'
-            )}
-            title={showOnlyDiffs ? 'Show all text' : 'Show differences only'}
-          >
-            {showOnlyDiffs ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-            {showOnlyDiffs ? 'All Text' : 'Diffs Only'}
-          </button>
+          {/* View options - only in diff mode */}
+          {!editMode && (
+            <button
+              onClick={() => setShowOnlyDiffs(!showOnlyDiffs)}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5 text-sm rounded transition-colors',
+                showOnlyDiffs ? 'bg-blue-600 text-white' : 'hover:bg-gray-700'
+              )}
+              title={showOnlyDiffs ? 'Show all text' : 'Show differences only'}
+            >
+              {showOnlyDiffs ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              {showOnlyDiffs ? 'All Text' : 'Diffs Only'}
+            </button>
+          )}
 
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input
@@ -336,110 +385,147 @@ export function EnhancedDiffViewer() {
         </div>
       )}
 
-      {/* Main diff area */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* Left panel */}
-        <div
-          ref={leftPanelRef}
-          className="flex-1 overflow-auto font-mono text-sm"
-          onScroll={(e) => handleScroll(e, 'left')}
-        >
-          <div style={{ minHeight: displayLines.length * LINE_HEIGHT }}>
-            {displayLines.map((line, index) => (
-              <DiffLineRow key={index} line={line} side="left" lineHeight={LINE_HEIGHT} />
-            ))}
+      {/* Main content area */}
+      {editMode ? (
+        /* Edit Mode - Two textareas side by side */
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          {/* Left editor */}
+          <div className="flex-1 flex flex-col border-r border-gray-700">
+            <div className="px-3 py-1.5 bg-blue-900/30 border-b border-gray-700 text-xs text-blue-400">
+              Editing: {leftFile?.name || 'Left'}
+            </div>
+            <textarea
+              ref={leftTextareaRef}
+              value={editedContent.left}
+              onChange={handleLeftTextChange}
+              onScroll={(e) => handleEditScroll(e, 'left')}
+              className="flex-1 w-full p-3 bg-gray-900 text-gray-200 font-mono text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
+              spellCheck={false}
+              placeholder="Enter or paste text here..."
+            />
+          </div>
+
+          {/* Right editor */}
+          <div className="flex-1 flex flex-col">
+            <div className="px-3 py-1.5 bg-green-900/30 border-b border-gray-700 text-xs text-green-400">
+              Editing: {rightFile?.name || 'Right'}
+            </div>
+            <textarea
+              ref={rightTextareaRef}
+              value={editedContent.right}
+              onChange={handleRightTextChange}
+              onScroll={(e) => handleEditScroll(e, 'right')}
+              className="flex-1 w-full p-3 bg-gray-900 text-gray-200 font-mono text-sm resize-none focus:outline-none focus:ring-1 focus:ring-green-500"
+              spellCheck={false}
+              placeholder="Enter or paste text here..."
+            />
           </div>
         </div>
+      ) : (
+        /* Diff View Mode */
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          {/* Left panel */}
+          <div
+            ref={leftPanelRef}
+            className="flex-1 overflow-auto font-mono text-sm"
+            onScroll={(e) => handleScroll(e, 'left')}
+          >
+            <div style={{ minHeight: displayLines.length * LINE_HEIGHT }}>
+              {displayLines.map((line, index) => (
+                <DiffLineRow key={index} line={line} side="left" lineHeight={LINE_HEIGHT} />
+              ))}
+            </div>
+          </div>
 
-        {/* Center gutter with action buttons */}
-        <div
-          ref={gutterRef}
-          className="w-14 bg-gray-800 border-x border-gray-700 overflow-auto flex-shrink-0"
-          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-        >
-          <div style={{ minHeight: displayLines.length * LINE_HEIGHT }} className="relative">
-            {diffResult?.blocks.map((block, blockIndex) => {
-              if (block.type === 'unchanged') return null;
+          {/* Center gutter with action buttons */}
+          <div
+            ref={gutterRef}
+            className="w-14 bg-gray-800 border-x border-gray-700 overflow-auto flex-shrink-0"
+            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          >
+            <div style={{ minHeight: displayLines.length * LINE_HEIGHT }} className="relative">
+              {diffResult?.blocks.map((block, blockIndex) => {
+                if (block.type === 'unchanged') return null;
 
-              // Determine which buttons to show based on block type
-              const showCopyToLeft = block.type === 'added' || block.type === 'modified';
-              const showCopyToRight = block.type === 'removed' || block.type === 'modified';
-              const showDeleteLeft = block.type === 'removed' || block.type === 'modified';
-              const showDeleteRight = block.type === 'added' || block.type === 'modified';
+                const showCopyToLeft = block.type === 'added' || block.type === 'modified';
+                const showCopyToRight = block.type === 'removed' || block.type === 'modified';
+                const showDeleteLeft = block.type === 'removed' || block.type === 'modified';
+                const showDeleteRight = block.type === 'added' || block.type === 'modified';
 
-              return (
-                <div
-                  key={blockIndex}
-                  className="absolute flex flex-col items-center justify-center gap-0.5 py-0.5"
-                  style={{
-                    top: block.startIndex * LINE_HEIGHT,
-                    height: block.lines.length * LINE_HEIGHT,
-                    width: 56,
-                    left: 0,
-                  }}
-                >
-                  {/* Copy buttons row */}
-                  <div className="flex gap-0.5">
-                    {showCopyToLeft && (
-                      <button
-                        onClick={() => copyBlockToLeft(blockIndex)}
-                        className="p-0.5 bg-blue-600 hover:bg-blue-500 rounded text-white"
-                        title="Copy to left (←)"
-                      >
-                        <ChevronLeft className="w-3 h-3" />
-                      </button>
-                    )}
-                    {showCopyToRight && (
-                      <button
-                        onClick={() => copyBlockToRight(blockIndex)}
-                        className="p-0.5 bg-green-600 hover:bg-green-500 rounded text-white"
-                        title="Copy to right (→)"
-                      >
-                        <ChevronRight className="w-3 h-3" />
-                      </button>
-                    )}
+                return (
+                  <div
+                    key={blockIndex}
+                    className="absolute flex flex-col items-center justify-center gap-0.5 py-0.5"
+                    style={{
+                      top: block.startIndex * LINE_HEIGHT,
+                      height: block.lines.length * LINE_HEIGHT,
+                      width: 56,
+                      left: 0,
+                    }}
+                  >
+                    {/* Copy buttons row */}
+                    <div className="flex gap-0.5">
+                      {showCopyToLeft && (
+                        <button
+                          onClick={() => copyBlockToLeft(blockIndex)}
+                          className="p-0.5 bg-blue-600 hover:bg-blue-500 rounded text-white"
+                          title="Copy to left (←)"
+                        >
+                          <ChevronLeft className="w-3 h-3" />
+                        </button>
+                      )}
+                      {showCopyToRight && (
+                        <button
+                          onClick={() => copyBlockToRight(blockIndex)}
+                          className="p-0.5 bg-green-600 hover:bg-green-500 rounded text-white"
+                          title="Copy to right (→)"
+                        >
+                          <ChevronRight className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Delete buttons row */}
+                    <div className="flex gap-0.5">
+                      {showDeleteLeft && (
+                        <button
+                          onClick={() => deleteBlockFromLeft(blockIndex)}
+                          className="p-0.5 bg-red-700 hover:bg-red-600 rounded text-white"
+                          title="Delete from left"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                      {showDeleteRight && (
+                        <button
+                          onClick={() => deleteBlockFromRight(blockIndex)}
+                          className="p-0.5 bg-red-500 hover:bg-red-400 rounded text-white"
+                          title="Delete from right"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
                   </div>
+                );
+              })}
+            </div>
+          </div>
 
-                  {/* Delete buttons row */}
-                  <div className="flex gap-0.5">
-                    {showDeleteLeft && (
-                      <button
-                        onClick={() => deleteBlockFromLeft(blockIndex)}
-                        className="p-0.5 bg-red-700 hover:bg-red-600 rounded text-white"
-                        title="Delete from left"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    )}
-                    {showDeleteRight && (
-                      <button
-                        onClick={() => deleteBlockFromRight(blockIndex)}
-                        className="p-0.5 bg-red-500 hover:bg-red-400 rounded text-white"
-                        title="Delete from right"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          {/* Right panel */}
+          <div
+            ref={rightPanelRef}
+            className="flex-1 overflow-auto font-mono text-sm"
+            onScroll={(e) => handleScroll(e, 'right')}
+          >
+            <div style={{ minHeight: displayLines.length * LINE_HEIGHT }}>
+              {displayLines.map((line, index) => (
+                <DiffLineRow key={index} line={line} side="right" lineHeight={LINE_HEIGHT} />
+              ))}
+            </div>
           </div>
         </div>
-
-        {/* Right panel */}
-        <div
-          ref={rightPanelRef}
-          className="flex-1 overflow-auto font-mono text-sm"
-          onScroll={(e) => handleScroll(e, 'right')}
-        >
-          <div style={{ minHeight: displayLines.length * LINE_HEIGHT }}>
-            {displayLines.map((line, index) => (
-              <DiffLineRow key={index} line={line} side="right" lineHeight={LINE_HEIGHT} />
-            ))}
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
