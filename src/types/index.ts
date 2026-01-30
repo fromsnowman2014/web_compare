@@ -81,6 +81,13 @@ export interface HexDiffLine {
   diffPositions: number[];
 }
 
+export interface DiffOptions {
+  ignoreWhitespace: boolean;
+  ignoreCase: boolean;
+  ignoreBlankLines: boolean;
+  normalizeLineEndings: boolean;
+}
+
 export interface CompareState {
   leftFile: FileData | null;
   rightFile: FileData | null;
@@ -91,6 +98,12 @@ export interface CompareState {
     left: string;
     right: string;
   };
+  diffOptions: DiffOptions;
+  // Undo/Redo history
+  history: {
+    past: Array<{ left: string; right: string }>;
+    future: Array<{ left: string; right: string }>;
+  };
 }
 
 export interface CompareActions {
@@ -100,5 +113,10 @@ export interface CompareActions {
   setDirectoryDiff: (diff: DirectoryDiffItem[] | null) => void;
   setSyncScroll: (sync: boolean) => void;
   updateEditedContent: (side: 'left' | 'right', content: string) => void;
+  setDiffOptions: (options: Partial<DiffOptions>) => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
   reset: () => void;
 }

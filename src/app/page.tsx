@@ -5,6 +5,7 @@ import { FileDropzone, DropItem } from '@/components/FileDropzone';
 import { EnhancedDiffViewer } from '@/components/EnhancedDiffViewer';
 import { HexViewer } from '@/components/HexViewer';
 import { DirectoryViewer } from '@/components/DirectoryViewer';
+import { ErrorBoundary, DiffViewerErrorBoundary } from '@/components/ErrorBoundary';
 import { useCompareStore } from '@/store/compare';
 import type { FileData } from '@/types';
 import { cn } from '@/lib/utils';
@@ -326,17 +327,21 @@ export default function Home() {
 
             {/* Comparison content */}
             <div className="flex-1 min-h-0">
-              {viewMode === 'directory' && shouldShowDirectoryView ? (
-                <DirectoryViewer
-                  leftFiles={leftDirectoryFiles.length > 0 ? leftDirectoryFiles : (leftFile ? [leftFile] : [])}
-                  rightFiles={rightDirectoryFiles.length > 0 ? rightDirectoryFiles : (rightFile ? [rightFile] : [])}
-                  onFileSelect={handleDirectoryFileSelect}
-                />
-              ) : viewMode === 'binary' ? (
-                <HexViewer />
-              ) : (
-                <EnhancedDiffViewer />
-              )}
+              <ErrorBoundary onReset={handleReset}>
+                {viewMode === 'directory' && shouldShowDirectoryView ? (
+                  <DirectoryViewer
+                    leftFiles={leftDirectoryFiles.length > 0 ? leftDirectoryFiles : (leftFile ? [leftFile] : [])}
+                    rightFiles={rightDirectoryFiles.length > 0 ? rightDirectoryFiles : (rightFile ? [rightFile] : [])}
+                    onFileSelect={handleDirectoryFileSelect}
+                  />
+                ) : viewMode === 'binary' ? (
+                  <HexViewer />
+                ) : (
+                  <DiffViewerErrorBoundary onReset={handleReset}>
+                    <EnhancedDiffViewer />
+                  </DiffViewerErrorBoundary>
+                )}
+              </ErrorBoundary>
             </div>
           </div>
         )}
@@ -361,12 +366,22 @@ export default function Home() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-gray-400 mt-2">Navigation</h3>
               <ShortcutItem shortcut="F7" description="Go to next difference" />
               <ShortcutItem shortcut="Shift + F7" description="Go to previous difference" />
-              <ShortcutItem shortcut="Ctrl + S" description="Download current file (in edit mode)" />
-              <ShortcutItem shortcut="Ctrl + Z" description="Undo (in edit mode)" />
-              <ShortcutItem shortcut="Ctrl + Shift + Z" description="Redo (in edit mode)" />
+              <ShortcutItem shortcut="Ctrl + G" description="Go to line number" />
+
+              <h3 className="text-sm font-medium text-gray-400 mt-4">Search</h3>
+              <ShortcutItem shortcut="Ctrl + F" description="Open search" />
+              <ShortcutItem shortcut="F3" description="Find next match" />
+              <ShortcutItem shortcut="Shift + F3" description="Find previous match" />
+              <ShortcutItem shortcut="Escape" description="Close search/dialogs" />
+
+              <h3 className="text-sm font-medium text-gray-400 mt-4">Editing</h3>
+              <ShortcutItem shortcut="Ctrl + Z" description="Undo" />
+              <ShortcutItem shortcut="Ctrl + Y" description="Redo" />
+              <ShortcutItem shortcut="Ctrl + Shift + Z" description="Redo (alternative)" />
             </div>
           </div>
         </div>

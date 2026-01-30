@@ -1,11 +1,14 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Upload, Link, FolderOpen, File, Folder, X } from 'lucide-react';
+import { Upload, Link, FolderOpen, File, Folder, X, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { FileData } from '@/types';
 import { processFile, fetchFileFromUrl } from '@/lib/file';
 import { formatBytes } from '@/lib/utils';
+
+const LARGE_FILE_WARNING_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 export interface DropItem {
   type: 'file' | 'directory';
@@ -38,8 +41,42 @@ export function FileDropzone({
   const [isLoading, setIsLoading] = useState(false);
   const [url, setUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [largeFileWarning, setLargeFileWarning] = useState<{
+    show: boolean;
+    file: File | null;
+    size: number;
+    onConfirm: () => void;
+  }>({ show: false, file: null, size: 0, onConfirm: () => {} });
 
   const hasContent = currentFile || (currentDirectory && currentDirectory.length > 0);
+
+  const checkFileSize = useCallback((file: File): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (file.size > MAX_FILE_SIZE) {
+        setError(`File is too large (${formatBytes(file.size)}). Maximum size is ${formatBytes(MAX_FILE_SIZE)}.`);
+        resolve(false);
+        return;
+      }
+
+      if (file.size > LARGE_FILE_WARNING_SIZE) {
+        setLargeFileWarning({
+          show: true,
+          file,
+          size: file.size,
+          onConfirm: () => {
+            setLargeFileWarning({ show: false, file: null, size: 0, onConfirm: () => {} });
+            resolve(true);
+          },
+        });
+      } else {
+        resolve(true);
+      }
+    });
+  }, []);
+
+  const handleLargeFileCancel = useCallback(() => {
+    setLargeFileWarning({ show: false, file: null, size: 0, onConfirm: () => {} });
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -116,6 +153,29 @@ export function FileDropzone({
           if (entries.length === 1 && entries[0].isFile) {
             const file = e.dataTransfer.files[0];
             if (file) {
+              // Check file size
+              if (file.size > MAX_FILE_SIZE) {
+                setError(`File is too large (${formatBytes(file.size)}). Maximum size is ${formatBytes(MAX_FILE_SIZE)}.`);
+                return;
+              }
+              if (file.size > LARGE_FILE_WARNING_SIZE) {
+                setLargeFileWarning({
+                  show: true,
+                  file,
+                  size: file.size,
+                  onConfirm: async () => {
+                    setLargeFileWarning({ show: false, file: null, size: 0, onConfirm: () => {} });
+                    setIsLoading(true);
+                    try {
+                      const fileData = await processFile(file);
+                      onFileLoaded(fileData);
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  },
+                });
+                return;
+              }
               const fileData = await processFile(file);
               onFileLoaded(fileData);
             }
@@ -141,16 +201,43 @@ export function FileDropzone({
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       setError(null);
-      setIsLoading(true);
 
       try {
         const files = e.target.files;
         if (!files || files.length === 0) return;
 
         if (files.length === 1) {
-          const fileData = await processFile(files[0]);
+          const file = files[0];
+          // Check file size
+          if (file.size > MAX_FILE_SIZE) {
+            setError(`File is too large (${formatBytes(file.size)}). Maximum size is ${formatBytes(MAX_FILE_SIZE)}.`);
+            e.target.value = '';
+            return;
+          }
+          if (file.size > LARGE_FILE_WARNING_SIZE) {
+            setLargeFileWarning({
+              show: true,
+              file,
+              size: file.size,
+              onConfirm: async () => {
+                setLargeFileWarning({ show: false, file: null, size: 0, onConfirm: () => {} });
+                setIsLoading(true);
+                try {
+                  const fileData = await processFile(file);
+                  onFileLoaded(fileData);
+                } finally {
+                  setIsLoading(false);
+                }
+              },
+            });
+            e.target.value = '';
+            return;
+          }
+          setIsLoading(true);
+          const fileData = await processFile(file);
           onFileLoaded(fileData);
         } else {
+          setIsLoading(true);
           // Multiple files selected (directory)
           const fileDataList: FileData[] = [];
           for (let i = 0; i < files.length; i++) {
@@ -332,6 +419,41 @@ export function FileDropzone({
       </div>
 
       {error && <p className="text-red-400 text-sm">{error}</p>}
+
+      {/* Large file warning dialog */}
+      {largeFileWarning.show && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl border border-gray-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-yellow-500/20 rounded-full">
+                <AlertTriangle className="w-6 h-6 text-yellow-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-yellow-400">Large File Warning</h3>
+            </div>
+            <p className="text-gray-300 text-sm mb-2">
+              The file you&apos;re about to load is <strong>{formatBytes(largeFileWarning.size)}</strong>.
+            </p>
+            <p className="text-gray-400 text-sm mb-4">
+              Large files may cause performance issues during comparison and editing.
+              Consider using a smaller file or splitting the content.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={handleLargeFileCancel}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={largeFileWarning.onConfirm}
+                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-sm transition-colors"
+              >
+                Load Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

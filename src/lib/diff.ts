@@ -1,8 +1,70 @@
 import { diffLines, diffWords } from 'diff';
-import type { DiffLine, DiffResult, DiffStats, CharDiff, HexDiffLine, DiffBlock } from '@/types';
+import type { DiffLine, DiffResult, DiffStats, CharDiff, HexDiffLine, DiffBlock, DiffOptions } from '@/types';
 
-export function computeTextDiff(leftText: string, rightText: string): DiffResult {
-  const lineDiffs = diffLines(leftText, rightText);
+const defaultOptions: DiffOptions = {
+  ignoreWhitespace: false,
+  ignoreCase: false,
+  ignoreBlankLines: false,
+  normalizeLineEndings: true,
+};
+
+/**
+ * Normalize text based on diff options before comparison
+ */
+function normalizeText(text: string, options: DiffOptions): string {
+  let result = text;
+
+  // Normalize line endings (CRLF -> LF)
+  if (options.normalizeLineEndings) {
+    result = result.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  }
+
+  return result;
+}
+
+/**
+ * Normalize a single line for comparison (but not for display)
+ */
+function normalizeLineForCompare(line: string, options: DiffOptions): string {
+  let result = line;
+
+  if (options.ignoreCase) {
+    result = result.toLowerCase();
+  }
+
+  if (options.ignoreWhitespace) {
+    // Collapse multiple spaces to single space and trim
+    result = result.replace(/\s+/g, ' ').trim();
+  }
+
+  return result;
+}
+
+/**
+ * Check if a line should be considered blank
+ */
+function isBlankLine(line: string): boolean {
+  return line.trim() === '';
+}
+
+export function computeTextDiff(
+  leftText: string,
+  rightText: string,
+  options: Partial<DiffOptions> = {}
+): DiffResult {
+  const opts = { ...defaultOptions, ...options };
+
+  // Normalize texts first
+  const normalizedLeft = normalizeText(leftText, opts);
+  const normalizedRight = normalizeText(rightText, opts);
+
+  // Build comparison options for the diff library
+  const diffOpts: { ignoreWhitespace?: boolean } = {};
+  if (opts.ignoreWhitespace) {
+    diffOpts.ignoreWhitespace = true;
+  }
+
+  const lineDiffs = diffLines(normalizedLeft, normalizedRight, diffOpts);
   const diffLines2: DiffLine[] = [];
   let leftLineNum = 1;
   let rightLineNum = 1;
@@ -22,6 +84,10 @@ export function computeTextDiff(leftText: string, rightText: string): DiffResult
 
     if (!current.added && !current.removed) {
       for (const line of currentLines) {
+        // Skip blank lines if ignoreBlankLines is enabled
+        if (opts.ignoreBlankLines && isBlankLine(line)) {
+          continue;
+        }
         diffLines2.push({
           lineNumber: { left: leftLineNum++, right: rightLineNum++ },
           content: { left: line, right: line },
@@ -229,4 +295,31 @@ export function findPrevDiffBlockIndex(blocks: DiffBlock[], currentBlockIndex: n
 
   const prev = [...diffBlocks].reverse().find(({ index }) => index < currentBlockIndex);
   return prev?.index ?? diffBlocks[diffBlocks.length - 1]?.index ?? currentBlockIndex;
+}
+
+/**
+ * Detect the line ending style used in text
+ */
+export function detectLineEndings(text: string): 'CRLF' | 'LF' | 'CR' | 'Mixed' | 'None' {
+  const crlfCount = (text.match(/\r\n/g) || []).length;
+  const lfOnlyCount = (text.match(/(?<!\r)\n/g) || []).length;
+  const crOnlyCount = (text.match(/\r(?!\n)/g) || []).length;
+
+  const total = crlfCount + lfOnlyCount + crOnlyCount;
+
+  if (total === 0) return 'None';
+  if (crlfCount > 0 && lfOnlyCount === 0 && crOnlyCount === 0) return 'CRLF';
+  if (lfOnlyCount > 0 && crlfCount === 0 && crOnlyCount === 0) return 'LF';
+  if (crOnlyCount > 0 && crlfCount === 0 && lfOnlyCount === 0) return 'CR';
+  return 'Mixed';
+}
+
+/**
+ * Get file size warning level
+ */
+export function getFileSizeWarning(size: number): 'none' | 'warning' | 'danger' {
+  const MB = 1024 * 1024;
+  if (size > 50 * MB) return 'danger';
+  if (size > 5 * MB) return 'warning';
+  return 'none';
 }

@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { useCompareStore } from '@/store/compare';
-import { computeTextDiff, getDiffBlocks, findNextDiffBlockIndex, findPrevDiffBlockIndex } from '@/lib/diff';
+import { computeTextDiff, getDiffBlocks, findNextDiffBlockIndex, findPrevDiffBlockIndex, detectLineEndings } from '@/lib/diff';
 import { cn, formatBytes } from '@/lib/utils';
 import { downloadFile } from '@/lib/file';
+import { useDebounce } from '@/hooks/useDebounce';
 import type { DiffLine, DiffBlock, FileData } from '@/types';
 import {
   ChevronUp,
@@ -18,9 +19,15 @@ import {
   FileText,
   Edit3,
   GitCompare,
+  Undo2,
+  Redo2,
+  Settings,
+  Search,
+  X,
 } from 'lucide-react';
 
 const LINE_HEIGHT = 20;
+const DEBOUNCE_DELAY = 300; // ms
 
 export function EnhancedDiffViewer() {
   const {
@@ -29,29 +36,51 @@ export function EnhancedDiffViewer() {
     diffResult,
     syncScroll,
     editedContent,
+    diffOptions,
     setDiffResult,
     setSyncScroll,
     updateEditedContent,
+    setDiffOptions,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useCompareStore();
 
   const [showOnlyDiffs, setShowOnlyDiffs] = useState(false);
   const [currentBlockIndex, setCurrentBlockIndex] = useState(0);
   const [editMode, setEditMode] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Array<{ lineIndex: number; side: 'left' | 'right' }>>([]);
+  const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
+  const [goToLineValue, setGoToLineValue] = useState('');
+  const [showGoToLine, setShowGoToLine] = useState(false);
 
   const leftPanelRef = useRef<HTMLDivElement>(null);
   const rightPanelRef = useRef<HTMLDivElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
   const leftTextareaRef = useRef<HTMLTextAreaElement>(null);
   const rightTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Compute diff from editedContent (not file content) so changes are reflected
+  // Debounce editedContent for diff computation to prevent lag during rapid typing
+  const debouncedLeft = useDebounce(editedContent.left, DEBOUNCE_DELAY);
+  const debouncedRight = useDebounce(editedContent.right, DEBOUNCE_DELAY);
+
+  // Compute diff from debounced content
   useEffect(() => {
     if (leftFile && rightFile && leftFile.type === 'text' && rightFile.type === 'text') {
-      const leftContent = editedContent.left || (typeof leftFile.content === 'string' ? leftFile.content : '');
-      const rightContent = editedContent.right || (typeof rightFile.content === 'string' ? rightFile.content : '');
-      setDiffResult(computeTextDiff(leftContent, rightContent));
+      const leftContent = debouncedLeft || (typeof leftFile.content === 'string' ? leftFile.content : '');
+      const rightContent = debouncedRight || (typeof rightFile.content === 'string' ? rightFile.content : '');
+      setDiffResult(computeTextDiff(leftContent, rightContent, diffOptions));
     }
-  }, [leftFile, rightFile, editedContent.left, editedContent.right, setDiffResult]);
+  }, [leftFile, rightFile, debouncedLeft, debouncedRight, diffOptions, setDiffResult]);
+
+  // Detect line endings for display
+  const leftLineEndings = useMemo(() => detectLineEndings(editedContent.left), [editedContent.left]);
+  const rightLineEndings = useMemo(() => detectLineEndings(editedContent.right), [editedContent.right]);
 
   const diffBlocks = useMemo(() => {
     return diffResult?.blocks ? getDiffBlocks(diffResult.blocks) : [];
@@ -76,6 +105,29 @@ export function EnhancedDiffViewer() {
 
     return diffResult.lines.filter((_, index) => visibleIndices.has(index));
   }, [diffResult, showOnlyDiffs]);
+
+  // Search functionality
+  useEffect(() => {
+    if (!searchQuery || !diffResult) {
+      setSearchResults([]);
+      return;
+    }
+
+    const results: Array<{ lineIndex: number; side: 'left' | 'right' }> = [];
+    const query = searchQuery.toLowerCase();
+
+    diffResult.lines.forEach((line, index) => {
+      if (line.content.left.toLowerCase().includes(query)) {
+        results.push({ lineIndex: index, side: 'left' });
+      }
+      if (line.content.right.toLowerCase().includes(query) && line.content.right !== line.content.left) {
+        results.push({ lineIndex: index, side: 'right' });
+      }
+    });
+
+    setSearchResults(results);
+    setCurrentSearchIndex(0);
+  }, [searchQuery, diffResult]);
 
   // Synchronized scrolling for diff view
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>, source: 'left' | 'right') => {
@@ -102,16 +154,20 @@ export function EnhancedDiffViewer() {
     }
   }, [syncScroll]);
 
+  const scrollToLine = useCallback((lineIndex: number) => {
+    const scrollPos = lineIndex * LINE_HEIGHT;
+    if (leftPanelRef.current) leftPanelRef.current.scrollTop = scrollPos;
+    if (rightPanelRef.current) rightPanelRef.current.scrollTop = scrollPos;
+    if (gutterRef.current) gutterRef.current.scrollTop = scrollPos;
+  }, []);
+
   const scrollToBlock = useCallback((blockIndex: number) => {
     if (!diffResult?.blocks) return;
     const block = diffResult.blocks[blockIndex];
     if (!block) return;
 
-    const scrollPos = block.startIndex * LINE_HEIGHT;
-    if (leftPanelRef.current) leftPanelRef.current.scrollTop = scrollPos;
-    if (rightPanelRef.current) rightPanelRef.current.scrollTop = scrollPos;
-    if (gutterRef.current) gutterRef.current.scrollTop = scrollPos;
-  }, [diffResult]);
+    scrollToLine(block.startIndex);
+  }, [diffResult, scrollToLine]);
 
   const goToNextBlock = useCallback(() => {
     if (!diffResult?.blocks) return;
@@ -127,20 +183,110 @@ export function EnhancedDiffViewer() {
     scrollToBlock(prevIndex);
   }, [diffResult, currentBlockIndex, scrollToBlock]);
 
+  const goToNextSearchResult = useCallback(() => {
+    if (searchResults.length === 0) return;
+    const nextIndex = (currentSearchIndex + 1) % searchResults.length;
+    setCurrentSearchIndex(nextIndex);
+    scrollToLine(searchResults[nextIndex].lineIndex);
+  }, [searchResults, currentSearchIndex, scrollToLine]);
+
+  const goToPrevSearchResult = useCallback(() => {
+    if (searchResults.length === 0) return;
+    const prevIndex = (currentSearchIndex - 1 + searchResults.length) % searchResults.length;
+    setCurrentSearchIndex(prevIndex);
+    scrollToLine(searchResults[prevIndex].lineIndex);
+  }, [searchResults, currentSearchIndex, scrollToLine]);
+
+  const handleGoToLine = useCallback(() => {
+    const lineNum = parseInt(goToLineValue, 10);
+    if (isNaN(lineNum) || lineNum < 1 || !diffResult) return;
+
+    // Find the line index for this line number
+    const lineIndex = diffResult.lines.findIndex(
+      line => line.lineNumber.left === lineNum || line.lineNumber.right === lineNum
+    );
+
+    if (lineIndex !== -1) {
+      scrollToLine(lineIndex);
+    }
+
+    setShowGoToLine(false);
+    setGoToLineValue('');
+  }, [goToLineValue, diffResult, scrollToLine]);
+
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't intercept shortcuts when in edit mode and typing
       if (editMode && (e.target instanceof HTMLTextAreaElement)) {
+        // But allow Ctrl+Z, Ctrl+Y for undo/redo
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            redo();
+          } else {
+            undo();
+          }
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+          e.preventDefault();
+          redo();
+          return;
+        }
         return;
       }
+
+      // Global shortcuts
       if (e.key === 'F7') {
         e.preventDefault();
         e.shiftKey ? goToPrevBlock() : goToNextBlock();
       }
+
+      // Ctrl+F for search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        setShowSearch(true);
+        setTimeout(() => searchInputRef.current?.focus(), 0);
+      }
+
+      // Ctrl+G for go to line
+      if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+        e.preventDefault();
+        setShowGoToLine(true);
+      }
+
+      // Escape to close dialogs
+      if (e.key === 'Escape') {
+        setShowSearch(false);
+        setShowGoToLine(false);
+        setShowOptions(false);
+      }
+
+      // F3 for next search result
+      if (e.key === 'F3') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          goToPrevSearchResult();
+        } else {
+          goToNextSearchResult();
+        }
+      }
+
+      // Ctrl+Z / Ctrl+Y for undo/redo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+      }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [goToNextBlock, goToPrevBlock, editMode]);
+  }, [goToNextBlock, goToPrevBlock, goToNextSearchResult, goToPrevSearchResult, editMode, undo, redo]);
 
   // Find insertion position for added blocks (where to insert in left)
   const findLeftInsertPosition = useCallback((block: DiffBlock) => {
@@ -269,12 +415,36 @@ export function EnhancedDiffViewer() {
     );
   }
 
+  // Empty file handling
+  const leftEmpty = !editedContent.left || editedContent.left.trim() === '';
+  const rightEmpty = !editedContent.right || editedContent.right.trim() === '';
+
+  if (leftEmpty && rightEmpty) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4">
+        <FileText className="w-16 h-16 text-gray-600" />
+        <div className="text-center">
+          <p className="text-lg font-medium">Both files are empty</p>
+          <p className="text-sm text-gray-600 mt-1">
+            Switch to Edit Mode to add content
+          </p>
+        </div>
+        <button
+          onClick={() => setEditMode(true)}
+          className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+        >
+          Open Edit Mode
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-gray-900">
       {/* Path Bar */}
       <div className="flex border-b border-gray-700">
-        <PathBar file={leftFile} side="left" />
-        <PathBar file={rightFile} side="right" />
+        <PathBar file={leftFile} side="left" lineEndings={leftLineEndings} />
+        <PathBar file={rightFile} side="right" lineEndings={rightLineEndings} />
       </div>
 
       {/* Toolbar */}
@@ -291,6 +461,32 @@ export function EnhancedDiffViewer() {
           >
             {editMode ? <GitCompare className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
             {editMode ? 'Diff View' : 'Edit Mode'}
+          </button>
+
+          <div className="w-px h-6 bg-gray-600 mx-2" />
+
+          {/* Undo/Redo buttons */}
+          <button
+            onClick={undo}
+            disabled={!canUndo()}
+            className={cn(
+              'p-2 rounded transition-colors',
+              canUndo() ? 'hover:bg-gray-700' : 'opacity-50 cursor-not-allowed'
+            )}
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo()}
+            className={cn(
+              'p-2 rounded transition-colors',
+              canRedo() ? 'hover:bg-gray-700' : 'opacity-50 cursor-not-allowed'
+            )}
+            title="Redo (Ctrl+Y)"
+          >
+            <Redo2 className="w-4 h-4" />
           </button>
 
           <div className="w-px h-6 bg-gray-600 mx-2" />
@@ -327,7 +523,36 @@ export function EnhancedDiffViewer() {
           )}
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          {/* Search button */}
+          <button
+            onClick={() => {
+              setShowSearch(!showSearch);
+              setTimeout(() => searchInputRef.current?.focus(), 0);
+            }}
+            className={cn(
+              'p-2 rounded transition-colors',
+              showSearch ? 'bg-blue-600 text-white' : 'hover:bg-gray-700'
+            )}
+            title="Search (Ctrl+F)"
+          >
+            <Search className="w-4 h-4" />
+          </button>
+
+          {/* Options button */}
+          <button
+            onClick={() => setShowOptions(!showOptions)}
+            className={cn(
+              'p-2 rounded transition-colors',
+              showOptions ? 'bg-blue-600 text-white' : 'hover:bg-gray-700'
+            )}
+            title="Diff Options"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+
+          <div className="w-px h-6 bg-gray-600 mx-2" />
+
           {/* View options - only in diff mode */}
           {!editMode && (
             <button
@@ -372,6 +597,128 @@ export function EnhancedDiffViewer() {
         </div>
       </div>
 
+      {/* Search bar */}
+      {showSearch && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-gray-800 border-b border-gray-700">
+          <Search className="w-4 h-4 text-gray-400" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.shiftKey ? goToPrevSearchResult() : goToNextSearchResult();
+              }
+              if (e.key === 'Escape') {
+                setShowSearch(false);
+              }
+            }}
+            placeholder="Search... (Enter for next, Shift+Enter for prev)"
+            className="flex-1 bg-gray-700 text-white px-3 py-1.5 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <span className="text-sm text-gray-400 min-w-[80px]">
+            {searchResults.length > 0
+              ? `${currentSearchIndex + 1} / ${searchResults.length}`
+              : 'No results'}
+          </span>
+          <button
+            onClick={goToPrevSearchResult}
+            disabled={searchResults.length === 0}
+            className="p-1.5 hover:bg-gray-700 rounded disabled:opacity-50"
+          >
+            <ChevronUp className="w-4 h-4" />
+          </button>
+          <button
+            onClick={goToNextSearchResult}
+            disabled={searchResults.length === 0}
+            className="p-1.5 hover:bg-gray-700 rounded disabled:opacity-50"
+          >
+            <ChevronDown className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setShowSearch(false)}
+            className="p-1.5 hover:bg-gray-700 rounded"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Go to line dialog */}
+      {showGoToLine && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-gray-800 border-b border-gray-700">
+          <span className="text-sm text-gray-400">Go to line:</span>
+          <input
+            type="number"
+            value={goToLineValue}
+            onChange={(e) => setGoToLineValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleGoToLine();
+              if (e.key === 'Escape') setShowGoToLine(false);
+            }}
+            placeholder="Line number"
+            className="w-32 bg-gray-700 text-white px-3 py-1.5 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+            autoFocus
+          />
+          <button
+            onClick={handleGoToLine}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-sm"
+          >
+            Go
+          </button>
+          <button
+            onClick={() => setShowGoToLine(false)}
+            className="p-1.5 hover:bg-gray-700 rounded"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Options panel */}
+      {showOptions && (
+        <div className="px-4 py-3 bg-gray-800 border-b border-gray-700 flex items-center gap-6">
+          <span className="text-sm text-gray-400 font-medium">Diff Options:</span>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={diffOptions.normalizeLineEndings}
+              onChange={(e) => setDiffOptions({ normalizeLineEndings: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600"
+            />
+            Normalize Line Endings
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={diffOptions.ignoreWhitespace}
+              onChange={(e) => setDiffOptions({ ignoreWhitespace: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600"
+            />
+            Ignore Whitespace
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={diffOptions.ignoreCase}
+              onChange={(e) => setDiffOptions({ ignoreCase: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600"
+            />
+            Ignore Case
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={diffOptions.ignoreBlankLines}
+              onChange={(e) => setDiffOptions({ ignoreBlankLines: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-600"
+            />
+            Ignore Blank Lines
+          </label>
+        </div>
+      )}
+
       {/* Diff stats */}
       {diffResult && (
         <div className="flex items-center gap-4 px-4 py-1.5 bg-gray-850 border-b border-gray-700 text-xs">
@@ -391,8 +738,9 @@ export function EnhancedDiffViewer() {
         <div className="flex-1 flex min-h-0 overflow-hidden">
           {/* Left editor */}
           <div className="flex-1 flex flex-col border-r border-gray-700">
-            <div className="px-3 py-1.5 bg-blue-900/30 border-b border-gray-700 text-xs text-blue-400">
-              Editing: {leftFile?.name || 'Left'}
+            <div className="px-3 py-1.5 bg-blue-900/30 border-b border-gray-700 text-xs text-blue-400 flex justify-between">
+              <span>Editing: {leftFile?.name || 'Left'}</span>
+              {leftEmpty && <span className="text-yellow-400">(Empty)</span>}
             </div>
             <textarea
               ref={leftTextareaRef}
@@ -407,8 +755,9 @@ export function EnhancedDiffViewer() {
 
           {/* Right editor */}
           <div className="flex-1 flex flex-col">
-            <div className="px-3 py-1.5 bg-green-900/30 border-b border-gray-700 text-xs text-green-400">
-              Editing: {rightFile?.name || 'Right'}
+            <div className="px-3 py-1.5 bg-green-900/30 border-b border-gray-700 text-xs text-green-400 flex justify-between">
+              <span>Editing: {rightFile?.name || 'Right'}</span>
+              {rightEmpty && <span className="text-yellow-400">(Empty)</span>}
             </div>
             <textarea
               ref={rightTextareaRef}
@@ -432,7 +781,20 @@ export function EnhancedDiffViewer() {
           >
             <div style={{ minHeight: displayLines.length * LINE_HEIGHT }}>
               {displayLines.map((line, index) => (
-                <DiffLineRow key={index} line={line} side="left" lineHeight={LINE_HEIGHT} />
+                <DiffLineRow
+                  key={index}
+                  line={line}
+                  side="left"
+                  lineHeight={LINE_HEIGHT}
+                  isSearchMatch={searchResults.some(
+                    r => r.lineIndex === index && r.side === 'left'
+                  )}
+                  isCurrentSearchMatch={
+                    searchResults[currentSearchIndex]?.lineIndex === index &&
+                    searchResults[currentSearchIndex]?.side === 'left'
+                  }
+                  searchQuery={searchQuery}
+                />
               ))}
             </div>
           </div>
@@ -520,7 +882,20 @@ export function EnhancedDiffViewer() {
           >
             <div style={{ minHeight: displayLines.length * LINE_HEIGHT }}>
               {displayLines.map((line, index) => (
-                <DiffLineRow key={index} line={line} side="right" lineHeight={LINE_HEIGHT} />
+                <DiffLineRow
+                  key={index}
+                  line={line}
+                  side="right"
+                  lineHeight={LINE_HEIGHT}
+                  isSearchMatch={searchResults.some(
+                    r => r.lineIndex === index && r.side === 'right'
+                  )}
+                  isCurrentSearchMatch={
+                    searchResults[currentSearchIndex]?.lineIndex === index &&
+                    searchResults[currentSearchIndex]?.side === 'right'
+                  }
+                  searchQuery={searchQuery}
+                />
               ))}
             </div>
           </div>
@@ -530,7 +905,15 @@ export function EnhancedDiffViewer() {
   );
 }
 
-function PathBar({ file, side }: { file: FileData | null; side: 'left' | 'right' }) {
+function PathBar({
+  file,
+  side,
+  lineEndings,
+}: {
+  file: FileData | null;
+  side: 'left' | 'right';
+  lineEndings: string;
+}) {
   const bgColor = side === 'left' ? 'bg-blue-900/30' : 'bg-green-900/30';
   const textColor = side === 'left' ? 'text-blue-400' : 'text-green-400';
 
@@ -542,9 +925,14 @@ function PathBar({ file, side }: { file: FileData | null; side: 'left' | 'right'
           {file?.name || 'No file selected'}
         </div>
         {file && (
-          <div className="text-xs text-gray-500">
-            {file.type} • {formatBytes(file.size)}
-            {file.lastModified && ` • ${new Date(file.lastModified).toLocaleString()}`}
+          <div className="text-xs text-gray-500 flex items-center gap-2">
+            <span>{file.type} • {formatBytes(file.size)}</span>
+            {lineEndings !== 'None' && (
+              <span className="text-gray-600">• {lineEndings}</span>
+            )}
+            {file.lastModified && (
+              <span>• {new Date(file.lastModified).toLocaleString()}</span>
+            )}
           </div>
         )}
       </div>
@@ -552,14 +940,32 @@ function PathBar({ file, side }: { file: FileData | null; side: 'left' | 'right'
   );
 }
 
-function DiffLineRow({ line, side, lineHeight }: { line: DiffLine; side: 'left' | 'right'; lineHeight: number }) {
+function DiffLineRow({
+  line,
+  side,
+  lineHeight,
+  isSearchMatch,
+  isCurrentSearchMatch,
+  searchQuery,
+}: {
+  line: DiffLine;
+  side: 'left' | 'right';
+  lineHeight: number;
+  isSearchMatch?: boolean;
+  isCurrentSearchMatch?: boolean;
+  searchQuery?: string;
+}) {
   const lineNumber = side === 'left' ? line.lineNumber.left : line.lineNumber.right;
   const content = side === 'left' ? line.content.left : line.content.right;
 
   let bgClass = '';
   let textClass = 'text-gray-300';
 
-  if (line.type === 'added') {
+  if (isCurrentSearchMatch) {
+    bgClass = 'bg-yellow-500/40';
+  } else if (isSearchMatch) {
+    bgClass = 'bg-yellow-500/20';
+  } else if (line.type === 'added') {
     bgClass = side === 'right' ? 'bg-green-900/40' : 'bg-gray-800/50';
     textClass = side === 'right' ? 'text-green-200' : 'text-gray-600';
   } else if (line.type === 'removed') {
@@ -571,6 +977,34 @@ function DiffLineRow({ line, side, lineHeight }: { line: DiffLine; side: 'left' 
   }
 
   const renderContent = () => {
+    // Highlight search query matches
+    if (searchQuery && content.toLowerCase().includes(searchQuery.toLowerCase())) {
+      const parts: React.ReactNode[] = [];
+      const lowerContent = content.toLowerCase();
+      const lowerQuery = searchQuery.toLowerCase();
+      let lastIndex = 0;
+
+      let index = lowerContent.indexOf(lowerQuery);
+      while (index !== -1) {
+        if (index > lastIndex) {
+          parts.push(content.slice(lastIndex, index));
+        }
+        parts.push(
+          <span key={index} className="bg-yellow-400 text-black rounded px-0.5">
+            {content.slice(index, index + searchQuery.length)}
+          </span>
+        );
+        lastIndex = index + searchQuery.length;
+        index = lowerContent.indexOf(lowerQuery, lastIndex);
+      }
+
+      if (lastIndex < content.length) {
+        parts.push(content.slice(lastIndex));
+      }
+
+      return parts;
+    }
+
     if (line.type === 'modified' && line.charDiffs) {
       return line.charDiffs
         .filter(d => d.side === side || d.type === 'unchanged')
